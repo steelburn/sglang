@@ -1671,6 +1671,11 @@ class ResumeMemoryOccupationReqOutput(BaseReq):
 @dataclass
 class CheckWeightsReqInput(BaseReq):
     action: str
+    # Which model runners to check: "target" (target model only), "draft" (draft
+    # worker(s) only), or "both" (default).
+    selector: Literal["target", "draft", "both"] = "both"
+    # Whether to include the target's vision-encoder/projector weights (default True).
+    include_visual: Optional[bool] = None
 
 
 @dataclass

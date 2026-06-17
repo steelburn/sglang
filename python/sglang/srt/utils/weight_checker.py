@@ -35,6 +35,8 @@ class ChecksumInfo(_StrictBaseModel):
     parallelism_info: ParallelismInfo
 
 
+# Non-persistent buffers (persistent=False): recomputed locally after each weight load, never part
+# of the synced payload.
 _NON_PERSISTENT_BUFFER_PATTERNS = (
     "cos_sin_cache",
     "inv_freq",
@@ -47,21 +49,44 @@ def _is_non_persistent_buffer_name(name: str) -> bool:
     return any(pat in name for pat in _NON_PERSISTENT_BUFFER_PATTERNS)
 
 
+def _is_skip_weight_check(param) -> bool:
+    # Tensors the owning layer flags as not equality-checkable (e.g. kv-cache k_scale/v_scale, a
+    # load-time placeholder later transformed by process_weights_after_loading).
+    return getattr(param, "_skip_weight_check", False)
+
+
+# Visual (vision-encoder + multimodal projector) weight-name prefixes, matched as substrings.
+_VISUAL_NAME_PATTERNS = (
+    "visual.",
+    "vision_tower.",
+    "vision_model.",
+    "vision_encoder.",
+    "mm_projector.",
+    "multi_modal_projector.",
+)
+
+
+def _is_visual_name(name: str) -> bool:
+    return any(pat in name for pat in _VISUAL_NAME_PATTERNS)
+
+
 class WeightChecker:
     def __init__(self, model_runner):
         self._model_runner = model_runner
         self._snapshot_tensors = None
 
-    def handle(self, action: str) -> Optional[Dict]:
-        logger.info(f"[WeightChecker] handle action={action}")
+    def handle(self, action: str, include_visual: bool = True) -> Optional[Dict]:
+        logger.info(
+            f"[WeightChecker] handle action={action} include_visual={include_visual}"
+        )
         if action == "snapshot":
             return self._snapshot()
         elif action == "reset_tensors":
-            return self._reset_tensors()
+            return self._reset_tensors(include_visual)
         elif action == "compare":
-            return self._compare()
+            return self._compare(include_visual)
         elif action == "checksum":
-            return self._compute_checksum()
+            return self._compute_checksum(include_visual)
         else:
             raise Exception(f"Unsupported {action=}")
 
@@ -74,19 +99,26 @@ class WeightChecker:
             named_tensors
         ), f"should not have duplicated tensor name"
 
-    def _reset_tensors(self):
+    def _reset_tensors(self, include_visual: bool = True):
         for name, param in self._model_state():
-            if _is_non_persistent_buffer_name(name):
+            # Poison only what compare verifies; skip exactly what compare/checksum skip.
+            if _is_non_persistent_buffer_name(name) or _is_skip_weight_check(param):
                 continue
-            param.copy_(_random_like(param))
+            # Visual weights load normally but stay out of the check unless
+            # include_visual is set; never poison them when skipped (reset must
+            # match compare's scope).
+            if not include_visual and _is_visual_name(name):
+                continue
+            param.copy_(_sentinel_like(param))
 
-    def _compare(self):
+    def _compare(self, include_visual: bool = True):
         assert self._snapshot_tensors is not None
 
         skip_compare_names = {
             name
             for name, param in self._model_state()
-            if getattr(param, "_skip_weight_check", False)
+            if _is_skip_weight_check(param)
+            or (not include_visual and _is_visual_name(name))
         }
         _check_tensors(
             expect_tensors=_postprocess_tensors(
@@ -97,14 +129,15 @@ class WeightChecker:
             ),
         )
 
-    def _compute_checksum(self) -> Dict:
+    def _compute_checksum(self, include_visual: bool = True) -> Dict:
         torch.cuda.synchronize()
         start = time.perf_counter()
 
         skip_compare_names = {
             name
             for name, param in self._model_state()
-            if getattr(param, "_skip_weight_check", False)
+            if _is_skip_weight_check(param)
+            or (not include_visual and _is_visual_name(name))
         }
 
         # Reuse the snapshot/compare postprocess pipeline so fp8 weights are
@@ -198,21 +231,19 @@ def _check_tensors(
         raise Exception(f"check tensor equality failed:\n" + "\n".join(error_messages))
 
 
-def _random_like(t: torch.Tensor):
-    device = t.device
-    shape = t.shape
-    dtype = t.dtype
+# Deterministic non-zero "poison" for reset: must differ from real weights so a
+# missed weight-sync is caught by compare. Avoid 0 (naturally-zero params) and 1.0
+# (RMSNorm/LayerNorm weights), both of which would alias a stale weight and mask the miss.
+_RESET_SENTINEL = 88.0  # representable in fp8 e4m3 (max 448), far from typical weight magnitudes
 
-    if dtype.is_floating_point:
-        return torch.rand(shape, device=device, dtype=torch.float32).to(dtype)
 
-    if dtype == torch.bool:
-        return torch.rand(shape, device=device) > 0.5
-
-    info = torch.iinfo(dtype)
-    return torch.randint(
-        low=int(info.min), high=int(info.max), size=shape, device=device, dtype=dtype
-    )
+def _sentinel_like(t: torch.Tensor) -> torch.Tensor:
+    if t.dtype == torch.bool:
+        return torch.ones_like(t)
+    if t.dtype.is_floating_point:
+        return torch.full_like(t, _RESET_SENTINEL)
+    info = torch.iinfo(t.dtype)
+    return torch.full_like(t, min(int(_RESET_SENTINEL), info.max))
 
 
 def _postprocess_tensors(
