@@ -1341,7 +1341,7 @@ class SchedulerDisaggMixin:
         # spans nest under the sender's trace (same mechanism SRT uses via pickle).
         if trace_state and trace_state.get("tracing_enable"):
             try:
-                ctx = object.__new__(TraceReqContext)
+                ctx = TraceReqContext(rid=trace_state.get("rid", req.request_id))
                 ctx.__setstate__(trace_state)
                 req.trace_ctx = ctx
             except Exception as e:
