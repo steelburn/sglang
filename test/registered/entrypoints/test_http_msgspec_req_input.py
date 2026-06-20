@@ -62,21 +62,39 @@ class TestHttpMsgspecReqInput(CustomTestCase):
                 "count": obj.count,
                 "values": obj.values,
                 "rid": obj.rid,
+                "http_worker_ipc": obj.http_worker_ipc,
             }
 
         openapi = app.openapi()
         operation = openapi["paths"]["/toy"]["post"]
         self.assertIn("requestBody", operation)
         self.assertNotIn("parameters", operation)
-        self.assertNotIn("rid", openapi["components"]["schemas"]["ToyReqInput"])
+        schema_properties = openapi["components"]["schemas"]["ToyReqInput"][
+            "properties"
+        ]
+        self.assertIn("rid", schema_properties)
+        self.assertIn("http_worker_ipc", schema_properties)
 
         client = TestClient(app)
-        response = client.post("/toy", json={"required": "x", "rid": "ignored"})
+        response = client.post(
+            "/toy",
+            json={
+                "required": "x",
+                "rid": "accepted",
+                "http_worker_ipc": "worker-0",
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json(),
-            {"required": "x", "count": 3, "values": [], "rid": None},
+            {
+                "required": "x",
+                "count": 3,
+                "values": [],
+                "rid": "accepted",
+                "http_worker_ipc": "worker-0",
+            },
         )
 
         response = client.post("/toy", json={"count": 4})
@@ -108,12 +126,12 @@ class TestHttpMsgspecReqInput(CustomTestCase):
             "UpdateWeightFromDiskReqInput"
         ]
         self.assertIn("model_path", openapi_schema["properties"])
-        self.assertNotIn("rid", openapi_schema["properties"])
+        self.assertIn("rid", openapi_schema["properties"])
 
         client = TestClient(app)
         response = client.post(
             "/update_weights_from_disk",
-            json={"model_path": "/tmp/model", "rid": "ignored"},
+            json={"model_path": "/tmp/model", "rid": "accepted"},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -131,7 +149,7 @@ class TestHttpMsgspecReqInput(CustomTestCase):
                 "token_step": 0,
                 "flush_cache": True,
                 "manifest": None,
-                "rid": None,
+                "rid": "accepted",
             },
         )
 

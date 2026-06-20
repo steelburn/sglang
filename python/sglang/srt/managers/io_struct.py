@@ -69,25 +69,9 @@ else:
 logger = logging.getLogger(__name__)
 
 
-_PYDANTIC_HTTP_EXCLUDED_FIELDS = frozenset(
-    {
-        "rid",
-        "http_worker_ipc",
-        "rids",
-        "http_worker_ipcs",
-    }
-)
-
-
 def _msgspec_struct_pydantic_core_schema(cls: type[msgspec.Struct], handler):
-    excluded_fields = _PYDANTIC_HTTP_EXCLUDED_FIELDS - getattr(
-        cls, "_pydantic_http_included_fields", frozenset()
-    )
     fields = {}
     for struct_field in msgspec.structs.fields(cls):
-        if struct_field.name in excluded_fields:
-            continue
-
         field_schema = handler.generate_schema(struct_field.type)
         required = (
             struct_field.default is msgspec.NODEFAULT
@@ -1778,8 +1762,6 @@ class SeparateReasoningReqInput(BaseReq, kw_only=True):
 
 
 class AbortReq(BaseReq, kw_only=True):
-    _pydantic_http_included_fields = frozenset({"rid"})
-
     # Whether to abort all requests
     abort_all: bool = False
     # The finished reason data
