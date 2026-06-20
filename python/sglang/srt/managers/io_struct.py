@@ -2224,10 +2224,12 @@ class PickleWrapper(msgspec.Struct, tag=True, array_like=True):
 def enc_hook(obj: Any) -> Any:
     if isinstance(obj, torch.Tensor):
         # encode torch tensor as Tuple(shape, dtype, data)
-        tensor_dtype = str(obj.dtype).split(".")[-1]  # e.g., "float32"
-        raw_data = obj.flatten().cpu().contiguous().view(torch.uint8).numpy().data
+        tensor_dtype = str(obj.dtype).removeprefix("torch.")  # e.g., "float32"
+        raw_data = (
+            obj.cpu().contiguous().reshape(-1).view(torch.uint8).numpy().tobytes()
+        )
         return (obj.shape, tensor_dtype, raw_data)
-    if isinstance(obj, np.ndarray):
+    elif isinstance(obj, np.ndarray):
         raw_data = np.ascontiguousarray(obj).reshape(-1).view(np.uint8).data
         return (obj.shape, obj.dtype.str, raw_data)
     elif isinstance(obj, array):
@@ -2235,21 +2237,17 @@ def enc_hook(obj: Any) -> Any:
     elif isinstance(obj, np.floating):
         return float(obj)
     elif isinstance(obj, MetricsCollectorWrapper):
-        # Don't serialize the MetricsCollectorWrapper object
-        # due to it hold a MetricsCollector which has _thread.RLock.
+        # Metrics collectors are process-local handles and are reattached
+        # by the receiving process when metrics are enabled.
         return None
     elif isinstance(obj, TraceSpan):
-        # Don't serialize the TraceSpan object due to it hold _thread.RLock.
+        # Live OpenTelemetry spans are process-local handles. Trace propagation
+        # uses serializable span contexts instead.
         return None
     else:
         if envs.SGLANG_LOG_PICKLE_IPC_OBJECTS.get():
             logger.info(f"Object of type {type(obj)} is encoding with pickle.")
-        try:
-            return pickle.dumps(obj)
-        except Exception as e:
-            raise ValueError(
-                f"Failed to encode object of type {type(obj)} with pickle: {e}."
-            )
+        return pickle.dumps(obj)
 
 
 def dec_hook(tp: Type, obj: Any) -> Any:
