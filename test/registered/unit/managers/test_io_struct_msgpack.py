@@ -13,10 +13,14 @@ maybe_stub_sgl_kernel()
 
 from sglang.srt.managers.io_struct import (  # noqa: E402
     BaseReq,
+    PickleWrapper,
+    dec_hook,
     enc_hook,
     hook_custom_types,
     msgpack_decode,
     msgpack_encode,
+    unwrap_from_pickle,
+    wrap_as_pickle,
 )
 from sglang.srt.observability import trace as trace_module  # noqa: E402
 from sglang.srt.observability.req_time_stats import (  # noqa: E402
@@ -40,7 +44,11 @@ class RuntimeHandlePayload(BaseReq, kw_only=True):
     span: Optional[TraceSpan] = None
 
 
-hook_custom_types(MsgpackPayload, RuntimeHandlePayload)
+class UnsupportedNestedPayload(BaseReq, kw_only=True):
+    value: Any
+
+
+hook_custom_types(MsgpackPayload, RuntimeHandlePayload, UnsupportedNestedPayload)
 
 
 class TestIoStructMsgpack(CustomTestCase):
@@ -105,6 +113,24 @@ class TestIoStructMsgpack(CustomTestCase):
 
         self.assertIsNone(rebuilt.metrics_collector)
         self.assertIsNone(rebuilt.span)
+
+    def test_unsupported_nested_object_fails_fast(self):
+        payload = UnsupportedNestedPayload(value=object())
+
+        with self.assertRaisesRegex(TypeError, "PickleWrapper"):
+            msgpack_encode(payload)
+
+        with self.assertRaisesRegex(TypeError, "PickleWrapper"):
+            dec_hook(object, b"")
+
+    def test_explicit_pickle_wrapper_round_trip(self):
+        value = {"nested": {1, 2, 3}}
+        wrapped = wrap_as_pickle(value)
+
+        self.assertIsInstance(wrapped, PickleWrapper)
+        rebuilt = msgpack_decode(msgpack_encode(wrapped))
+        self.assertEqual(rebuilt, value)
+        self.assertEqual(unwrap_from_pickle(wrapped), value)
 
 
 if __name__ == "__main__":

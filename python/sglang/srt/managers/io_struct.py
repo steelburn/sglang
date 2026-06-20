@@ -116,14 +116,6 @@ def _msgspec_struct_pydantic_core_schema(cls: type[msgspec.Struct], handler):
     )
 
 
-TokenLogprobValues = Optional[List[List[Optional[float]]]]
-TokenLogprobIndices = Optional[List[List[Optional[int]]]]
-TopLogprobValues = Optional[List[Optional[List[Optional[List[float]]]]]]
-TopLogprobIndices = Optional[List[Optional[List[Optional[List[int]]]]]]
-HiddenStateChunk = List[Optional[Union[float, List[float]]]]
-OutputHiddenStates = Optional[List[Optional[List[HiddenStateChunk]]]]
-
-
 # The BaseReq IPC class for IPC object
 class BaseReq(msgspec.Struct, tag=True, kw_only=True, array_like=True):
     rid: Optional[str] = None
@@ -156,9 +148,9 @@ class SessionParams:
 
 # Type definitions for multimodal input data
 # Individual data item types for each modality
-ImageDataInputItem = Union[Image, str, ImageData, Dict]
+ImageDataInputItem = Union[str, Dict, ImageData, Image]
 AudioDataInputItem = Union[str, Dict]
-VideoDataInputItem = Union[str, VideoData, Dict]
+VideoDataInputItem = Union[str, Dict, VideoData]
 # Union type for any multimodal data item
 MultimodalDataInputItem = Union[
     ImageDataInputItem, VideoDataInputItem, AudioDataInputItem
@@ -170,17 +162,18 @@ MultimodalDataInputFormat = Union[
     MultimodalDataInputItem,
 ]
 
-
 @dataclass
 class GenerateReqInput:
-    # From BaseReq dataclass
+    # Request ID(s). If omitted, generated during normalization. For batch
+    # requests, a string is expanded to per-item IDs using it as a prefix.
     rid: Optional[Union[str, List[str]]] = field(default=None, kw_only=True)
+    # Internal IPC endpoint of the HTTP/tokenizer worker that owns this request.
+    # Used to route outputs back in multi-tokenizer mode.
     http_worker_ipc: Optional[str] = field(default=None, kw_only=True)
 
     # The input prompt. It can be a single prompt or a batch of prompts.
     text: Optional[Union[List[str], str]] = None
     # The token ids for text.
-    #
     # Use C-loop validator to replace Pydantic per-element type check for efficiency.
     input_ids: Annotated[
         Optional[Union[List[List[int]], List[int]]],
@@ -263,30 +256,25 @@ class GenerateReqInput:
     bootstrap_pair_key: Optional[Union[List[str], str]] = None
     decode_tp_size: Optional[Union[List[Optional[int]], int]] = None
 
-    # Require reasoning for the request (hybrid reasoning model only)
-    require_reasoning: bool = False
-
     # For DP routing — external router assigns a specific DP worker
     routed_dp_rank: Optional[int] = None
     # For PD disagg — hint telling decode which prefill DP worker has the KV cache
     disagg_prefill_dp_rank: Optional[int] = None
-    # Deprecated: use routed_dp_rank instead
-    data_parallel_rank: Optional[int] = None
+    # Routing key for routing-key schedule policy
+    routing_key: Optional[str] = None
+    # Conversation id used for tracking requests
+    conversation_id: Optional[str] = None
 
     # For background responses (OpenAI responses API)
     background: bool = False
-
-    # Conversation id used for tracking requests
-    conversation_id: Optional[str] = None
+    # Require reasoning for the request (hybrid reasoning model only)
+    require_reasoning: bool = False
 
     # Priority for the request
     priority: Optional[int] = None
 
-    # Extra key for classifying the request (e.g. cache_salt)
+    # Extra cache key for classifying the request (e.g. cache_salt)
     extra_key: Optional[Union[List[str], str]] = None
-
-    # Routing key for routing-key schedule policy
-    routing_key: Optional[str] = None
 
     # Whether to disallow logging for this request (e.g. due to ZDR)
     no_logs: bool = False
@@ -296,10 +284,8 @@ class GenerateReqInput:
 
     # (Internal) Whether to return bytes for image generation
     return_bytes: bool = False
-
     # Whether to return entropy
     return_entropy: bool = False
-
     # Whether to return prompt token IDs without computing logprobs
     return_prompt_token_ids: bool = False
 
@@ -362,18 +348,6 @@ class GenerateReqInput:
             ValueError: If inputs are not properly specified (e.g., none or all of
                        text, input_ids, input_embeds are provided)
         """
-        if self.data_parallel_rank is not None:
-            import warnings
-
-            warnings.warn(
-                "'data_parallel_rank' is deprecated, use 'routed_dp_rank' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            if self.routed_dp_rank is None:
-                self.routed_dp_rank = self.data_parallel_rank
-            self.data_parallel_rank = None
-
         self._validate_inputs()
         self._determine_batch_size()
         self._handle_parallel_sampling()
@@ -811,8 +785,11 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
     input_text: Optional[Union[str, List[Union[str, List[str]]]]]  # str
     # The input token ids
     input_ids: Optional[array]  # Optional[array[int]]
+    # The input embeds
+    input_embeds: Optional[List[List[Union[float, List[float]]]]] = None
     # The multimodal inputs
     mm_inputs: Optional[PickleWrapper]  # Pickled Optional[MultimodalProcessorOutput]
+    token_type_ids: Optional[List[int]] = None
     # The sampling parameters
     sampling_params: SamplingParams
     # Whether to return the logprobs
@@ -825,22 +802,13 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
     token_ids_logprob: Optional[List[int]]
     # Whether to stream output
     stream: bool
-
     # Whether to return hidden states
     return_hidden_states: bool = False
-
     # Whether to return captured routed experts
     return_routed_experts: bool = False
+    return_indexer_topk: bool = False
     # See GenerateReqInput.routed_experts_start_len.
     routed_experts_start_len: int = 0
-
-    return_indexer_topk: bool = False
-
-    # The input embeds
-    input_embeds: Optional[List[List[Union[float, List[float]]]]] = None
-
-    # Embedding overrides to place at specific token positions.
-    positional_embed_overrides: Optional[PositionalEmbeds] = None
 
     # Session info for continual prompting
     session_params: Optional[SessionParams] = None
@@ -852,6 +820,8 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
     # of `CustomLogitProcessor` in python/sglang/srt/sampling/custom_logit_processor.py
     # Use the processor's `to_str()` method to generate the serialized string.
     custom_logit_processor: Optional[str] = None
+    # Embedding overrides to place at specific token positions.
+    positional_embed_overrides: Optional[PositionalEmbeds] = None
 
     # For disaggregated inference
     bootstrap_host: Optional[str] = None
@@ -860,33 +830,29 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
     bootstrap_pair_key: Optional[str] = None
     decode_tp_size: Optional[int] = None
 
-    # Require reasoning for the request (hybrid reasoning model only)
-    require_reasoning: bool = False
-
     # For DP routing
     routed_dp_rank: Optional[int] = None
     # For PD disagg — hint telling decode which prefill DP worker has the KV cache
     disagg_prefill_dp_rank: Optional[int] = None
+    # Routing key for routing-key schedule policy
+    routing_key: Optional[str] = None
+
+    # Require reasoning for the request (hybrid reasoning model only)
+    require_reasoning: bool = False
 
     # Priority for the request
     priority: Optional[int] = None
 
-    # Extra key for classifying the request (e.g. cache_salt)
+    # Extra cache key for classifying the request (e.g. cache_salt)
     extra_key: Optional[str] = None
-
-    # Routing key for routing-key schedule policy
-    routing_key: Optional[str] = None
 
     # Whether to disallow logging for this request (e.g. due to ZDR)
     no_logs: bool = False
 
     # (Internal) Whether to return bytes for image generation
     return_bytes: bool = False
-
     # Whether to return entropy
     return_entropy: bool = False
-
-    token_type_ids: Optional[List[int]] = None
 
     need_wait_for_mm_inputs: Optional[bool] = None
     num_items_assigned: Optional[Dict[Modality, List[int]]] = None
@@ -919,12 +885,19 @@ class BatchTokenizedGenerateReqInput(BaseBatchReq, kw_only=True):
 
 @dataclass
 class EmbeddingReqInput:
-    # From BaseReq dataclass
+    # Request ID(s). If omitted, generated during normalization. Batch requests
+    # must provide a list when specifying request IDs explicitly.
     rid: Optional[Union[str, List[str]]] = field(default=None, kw_only=True)
+    # Internal IPC endpoint of the HTTP/tokenizer worker that owns this request.
+    # Used to route outputs back in multi-tokenizer mode.
     http_worker_ipc: Optional[str] = field(default=None, kw_only=True)
 
     # The input prompt. It can be a single prompt or a batch of prompts.
     text: Optional[Union[List[List[str]], List[str], str]] = None
+    # The token ids for text; one can either specify text or input_ids.
+    input_ids: Optional[Union[List[List[int]], List[int]]] = None
+    # Dummy input embeds for compatibility
+    input_embeds: Optional[Union[List[List[List[float]]], List[List[float]]]] = None
     # The image input. It can be an image instance, file name, URL, or base64 encoded string.
     # Can be formatted as:
     # - Single image for a single request
@@ -936,8 +909,6 @@ class EmbeddingReqInput:
     video_data: Optional[MultimodalDataInputFormat] = None
     # The audio input. Like image data, it can be a file name, a url, or base64 encoded string.
     audio_data: Optional[MultimodalDataInputFormat] = None
-    # The token ids for text; one can either specify text or input_ids.
-    input_ids: Optional[Union[List[List[int]], List[int]]] = None
     # Placeholder token ID used to locate embedding override positions in input token IDs.
     embed_override_token_id: Optional[int] = None
     # Unresolved embedding overrides: per-input list of tensors.
@@ -947,44 +918,44 @@ class EmbeddingReqInput:
     # Runtime type: Optional[List[Optional[List[torch.Tensor]]]]
     # Typed as Any to avoid Pydantic/FastAPI schema errors (contains torch.Tensor).
     embed_overrides: Any = None
-    # Resolved embedding overrides with positions (set by tokenizer manager or score mixin).
-    # Runtime type: Optional[Union[PositionalEmbeds, List[Optional[PositionalEmbeds]]]]
-    positional_embed_overrides: Any = None
     # Dummy sampling params for compatibility
     sampling_params: Optional[Union[List[Dict], Dict]] = None
-    # Dummy input embeds for compatibility
-    input_embeds: Optional[Union[List[List[List[float]]], List[List[float]]]] = None
     # Whether to log metrics for this request (e.g. health_generate calls do not log metrics)
     log_metrics: bool = True
+
     # The modalities of the image data [image, multi-images, video]
     modalities: Optional[List[str]] = None
     # For cross-encoder requests
     is_cross_encoder_request: bool = False
-    # Priority for the request
-    priority: Optional[int] = None
-    # Routing key for routing-key schedule policy
-    routing_key: Optional[str] = None
-
-    # For background responses (OpenAI responses API)
-    background: bool = False
-
-    # Propagates trace context via Engine.encode/async_encode
-    external_trace_header: Optional[Dict] = None
-    received_time: Optional[float] = None
-
-    # The number of dimensions the resulting output embeddings should have. It is applicable for Matryoshka Embeddings.
-    dimensions: Optional[int] = None
 
     # The path to the LoRA adaptors
     lora_path: Optional[Union[List[Optional[str]], Optional[str]]] = None
     # The uid of LoRA adaptors, should be initialized by tokenizer manager
     lora_id: Optional[Union[List[Optional[str]], Optional[str]]] = None
 
+    # Resolved embedding overrides with positions (set by tokenizer manager or score mixin).
+    # Runtime type: Optional[Union[PositionalEmbeds, List[Optional[PositionalEmbeds]]]]
+    positional_embed_overrides: Any = None
+
+    # Routing key for routing-key schedule policy
+    routing_key: Optional[str] = None
+
+    # For background responses (OpenAI responses API)
+    background: bool = False
+
+    # Priority for the request
+    priority: Optional[int] = None
+
+    # The number of dimensions the resulting output embeddings should have. It is applicable for Matryoshka Embeddings.
+    dimensions: Optional[int] = None
     # Whether to return pooled hidden states (pre-head transformer output)
     return_pooled_hidden_states: bool = False
-
     # Whether to return prompt token IDs without computing logprobs
     return_prompt_token_ids: bool = False
+
+    # Propagates trace context via Engine.encode/async_encode
+    external_trace_header: Optional[Dict] = None
+    received_time: Optional[float] = None
 
     # Pre-computed delimiter indices for multi-item scoring.
     # Batch-level: List[List[int]] (one per request). After __getitem__: List[int].
@@ -1161,24 +1132,29 @@ class TokenizedEmbeddingReqInput(BaseReq, kw_only=True):
     token_type_ids: Optional[List[int]]
     # Dummy sampling params for compatibility
     sampling_params: SamplingParams
-    # Embedding overrides to place at specific token positions.
-    positional_embed_overrides: Optional[PositionalEmbeds] = None
-    # For DP routing
-    routed_dp_rank: Optional[int] = None
-    # Priority for the request
-    priority: Optional[int] = None
-    # The number of dimensions the resulting output embeddings should have. It is applicable for Matryoshka Embeddings.
-    dimensions: Optional[int] = None
 
     # LoRA related
     lora_id: Optional[str] = None  # None means just use the base model
-    # Pre-computed delimiter indices for multi-item scoring
-    multi_item_delimiter_indices: Optional[List[int]] = None
-    # For observability
-    time_stats: Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]] = None
 
+    # Embedding overrides to place at specific token positions.
+    positional_embed_overrides: Optional[PositionalEmbeds] = None
+
+    # For DP routing
+    routed_dp_rank: Optional[int] = None
+
+    # Priority for the request
+    priority: Optional[int] = None
+
+    # The number of dimensions the resulting output embeddings should have. It is applicable for Matryoshka Embeddings.
+    dimensions: Optional[int] = None
     # Whether to return pooled hidden states (pre-head transformer output)
     return_pooled_hidden_states: bool = False
+
+    # Pre-computed delimiter indices for multi-item scoring
+    multi_item_delimiter_indices: Optional[List[int]] = None
+
+    # For observability
+    time_stats: Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]] = None
 
 
 class BatchTokenizedEmbeddingReqInput(BaseBatchReq, kw_only=True):
@@ -1193,6 +1169,14 @@ class BatchTokenizedEmbeddingReqInput(BaseBatchReq, kw_only=True):
 
     def __iter__(self):
         return iter(self.batch)
+
+
+TokenLogprobValues = Optional[List[List[Optional[float]]]]
+TokenLogprobIndices = Optional[List[List[Optional[int]]]]
+TopLogprobValues = Optional[List[Optional[List[Optional[List[float]]]]]]
+TopLogprobIndices = Optional[List[Optional[List[Optional[List[int]]]]]]
+HiddenStateChunk = List[Optional[Union[float, List[float]]]]
+OutputHiddenStates = Optional[List[Optional[List[HiddenStateChunk]]]]
 
 
 class BatchTokenIDOutput(BaseBatchReq, kw_only=True):
@@ -2252,9 +2236,12 @@ def enc_hook(obj: Any) -> Any:
         # uses serializable span contexts instead.
         return None
     else:
-        if envs.SGLANG_LOG_PICKLE_IPC_OBJECTS.get():
-            logger.info(f"Object of type {type(obj)} is encoding with pickle.")
-        return pickle.dumps(obj)
+        raise TypeError(
+            f"Cannot msgpack encode object of type {type(obj)} with enc_hook. "
+            "Use an explicit PickleWrapper field via wrap_as_pickle(...) for "
+            "arbitrary payloads, or add a dedicated enc_hook/dec_hook branch "
+            "for this transport type."
+        )
 
 
 def _maybe_load_pickled_value(obj: Any) -> Any:
@@ -2302,11 +2289,12 @@ def dec_hook(tp: Type, obj: Any) -> Any:
         trace_state = _maybe_load_pickled_value(trace_state)
         return TraceSpanContext(trace_id, span_id, is_remote, trace_flags, trace_state)
     else:
-        if envs.SGLANG_LOG_PICKLE_IPC_OBJECTS.get():
-            logger.info(
-                f"Object of type {type(obj)} and {str(tp)} is decoding with pickle."
-            )
-        return pickle.loads(obj)
+        raise TypeError(
+            f"Cannot msgpack decode object of type {type(obj)} as {tp} with "
+            "dec_hook. Use an explicit PickleWrapper field via wrap_as_pickle(...) "
+            "and unwrap_from_pickle(...) for arbitrary payloads, or add a "
+            "dedicated enc_hook/dec_hook branch for this transport type."
+        )
 
 
 _struct_types = tuple(

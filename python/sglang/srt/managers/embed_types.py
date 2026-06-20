@@ -37,7 +37,6 @@ class PositionalEmbeds:
         positions: List of positions where embeddings should be injected.
     """
 
-    # Union[List[torch.Tensor], torch.Tensor]
     embeds: torch.Tensor
     positions: List[int]
 
