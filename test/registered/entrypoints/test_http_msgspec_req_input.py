@@ -13,6 +13,7 @@ from sglang.test.test_utils import CustomTestCase, maybe_stub_sgl_kernel
 maybe_stub_sgl_kernel()
 
 from sglang.srt.managers.io_struct import (  # noqa: E402
+    AbortReq,
     BaseReq,
     UpdateWeightFromDiskReqInput,
 )
@@ -139,6 +140,33 @@ class TestHttpMsgspecReqInput(CustomTestCase):
             json={"load_format": "auto"},
         )
         self.assertEqual(response.status_code, 422)
+
+    def test_abort_req_accepts_http_rid(self):
+        obj = TypeAdapter(AbortReq).validate_python(
+            {"rid": "request-id", "abort_all": False}
+        )
+        self.assertEqual(obj.rid, "request-id")
+
+        app = FastAPI()
+
+        @app.post("/abort_request")
+        def abort_request(obj: Annotated[AbortReq, Body()]):
+            return {"rid": obj.rid, "abort_all": obj.abort_all}
+
+        openapi_schema = app.openapi()["components"]["schemas"]["AbortReq"]
+        self.assertIn("rid", openapi_schema["properties"])
+
+        client = TestClient(app)
+        response = client.post(
+            "/abort_request",
+            json={"rid": "request-id", "abort_all": False},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"rid": "request-id", "abort_all": False},
+        )
 
 
 if __name__ == "__main__":

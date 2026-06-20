@@ -80,9 +80,12 @@ _PYDANTIC_HTTP_EXCLUDED_FIELDS = frozenset(
 
 
 def _msgspec_struct_pydantic_core_schema(cls: type[msgspec.Struct], handler):
+    excluded_fields = _PYDANTIC_HTTP_EXCLUDED_FIELDS - getattr(
+        cls, "_pydantic_http_included_fields", frozenset()
+    )
     fields = {}
     for struct_field in msgspec.structs.fields(cls):
-        if struct_field.name in _PYDANTIC_HTTP_EXCLUDED_FIELDS:
+        if struct_field.name in excluded_fields:
             continue
 
         field_schema = handler.generate_schema(struct_field.type)
@@ -1775,6 +1778,8 @@ class SeparateReasoningReqInput(BaseReq, kw_only=True):
 
 
 class AbortReq(BaseReq, kw_only=True):
+    _pydantic_http_included_fields = frozenset({"rid"})
+
     # Whether to abort all requests
     abort_all: bool = False
     # The finished reason data
