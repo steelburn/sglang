@@ -1755,12 +1755,6 @@ class SlowDownReqOutput(BaseReq, kw_only=True):
     pass
 
 
-class SeparateReasoningReqInput(BaseReq, kw_only=True):
-    text: str  # The text to parse.
-    reasoning_parser: str  # Specify the parser type, e.g., "deepseek-r1".
-    return_blocks: bool = False  # If True, also return segmented reasoning blocks.
-
-
 class AbortReq(BaseReq, kw_only=True):
     # Whether to abort all requests
     abort_all: bool = False
@@ -1903,13 +1897,34 @@ class ExpertDistributionReqOutput(BaseReq, kw_only=True):
 class Function:
     description: Optional[str] = None
     name: Optional[str] = None
-    parameters: Optional[object] = None
+    parameters: Optional[Any] = None
 
 
 @dataclass
 class Tool:
     function: Function
     type: Optional[str] = "function"
+
+
+class ParseFunctionCallReq(BaseReq, kw_only=True):
+    text: str  # The text to parse.
+    tools: List[Tool] = msgspec.field(
+        default_factory=list
+    )  # A list of available function tools (name, parameters, etc.).
+    tool_call_parser: Optional[str] = (
+        None  # Specify the parser type, e.g. 'llama3', 'qwen25', or 'mistral'. If not specified, tries all.
+    )
+
+
+class SeparateReasoningReqInput(BaseReq, kw_only=True):
+    text: str  # The text to parse.
+    reasoning_parser: str  # Specify the parser type, e.g., "deepseek-r1".
+    return_blocks: bool = False  # If True, also return segmented reasoning blocks.
+
+
+class VertexGenerateReqInput(BaseReq, kw_only=True):
+    instances: List[dict]
+    parameters: Optional[dict] = None
 
 
 class RpcReqInput(BaseReq, kw_only=True):
@@ -2164,31 +2179,12 @@ class DumperControlReqOutput(BaseReq, kw_only=True):
     error: str = ""
 
 
-@dataclass
-class ParseFunctionCallReq:
-    text: str  # The text to parse.
-    tools: List[Tool] = field(
-        default_factory=list
-    )  # A list of available function tools (name, parameters, etc.).
-    tool_call_parser: Optional[str] = (
-        None  # Specify the parser type, e.g. 'llama3', 'qwen25', or 'mistral'. If not specified, tries all.
-    )
-
-
-@dataclass
-class VertexGenerateReqInput:
-    instances: List[dict]
-    parameters: Optional[dict] = None
-
-
 # The following request types are either defined in other files,
 # or not subclasses of BaseReq/BaseBatchReq, so we skip the check for them.
 _IGNORE_REQ_TYPES_CHECK = (
     GenerateReqInput.__name__,
     EmbeddingReqInput.__name__,
     MultimodalProcessorOutput.__name__,
-    ParseFunctionCallReq.__name__,
-    VertexGenerateReqInput.__name__,
 )
 
 

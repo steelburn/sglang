@@ -15,8 +15,14 @@ maybe_stub_sgl_kernel()
 from sglang.srt.managers.io_struct import (  # noqa: E402
     AbortReq,
     BaseReq,
+    Function,
+    ParseFunctionCallReq,
     SetInternalStateReq,
+    Tool,
     UpdateWeightFromDiskReqInput,
+    VertexGenerateReqInput,
+    _msgpack_decoder,
+    _msgpack_encoder,
 )
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
@@ -211,6 +217,164 @@ class TestHttpMsgspecReqInput(CustomTestCase):
             response.json(),
             {"rid": "request-id", "abort_all": False},
         )
+
+    def test_parse_function_call_req_uses_direct_body(self):
+        app = FastAPI()
+
+        @app.post("/parse_function_call")
+        def parse_function_call(obj: Annotated[ParseFunctionCallReq, Body()]):
+            return {
+                "text": obj.text,
+                "tool_name": obj.tools[0].function.name,
+                "tool_type": obj.tools[0].type,
+                "tool_call_parser": obj.tool_call_parser,
+                "rid": obj.rid,
+                "http_worker_ipc": obj.http_worker_ipc,
+            }
+
+        operation = app.openapi()["paths"]["/parse_function_call"]["post"]
+        self.assertIn("requestBody", operation)
+        self.assertNotIn("parameters", operation)
+        openapi_schema = app.openapi()["components"]["schemas"][
+            "ParseFunctionCallReq"
+        ]
+        self.assertIn("text", openapi_schema["properties"])
+        self.assertIn("rid", openapi_schema["properties"])
+        self.assertIn("http_worker_ipc", openapi_schema["properties"])
+
+        client = TestClient(app)
+        response = client.post(
+            "/parse_function_call",
+            json={
+                "text": '<tool_call>{"name":"weather","arguments":{}}</tool_call>',
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "weather",
+                            "description": "Get weather",
+                            "parameters": {"type": "object"},
+                        },
+                    }
+                ],
+                "tool_call_parser": "llama3",
+                "rid": "request-id",
+                "http_worker_ipc": "worker-0",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "text": '<tool_call>{"name":"weather","arguments":{}}</tool_call>',
+                "tool_name": "weather",
+                "tool_type": "function",
+                "tool_call_parser": "llama3",
+                "rid": "request-id",
+                "http_worker_ipc": "worker-0",
+            },
+        )
+
+        response = client.post(
+            "/parse_function_call",
+            json={
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {"name": "weather"},
+                    }
+                ]
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_vertex_generate_req_input_uses_direct_body(self):
+        app = FastAPI()
+
+        @app.post("/vertex_generate")
+        def vertex_generate(vertex_req: Annotated[VertexGenerateReqInput, Body()]):
+            return {
+                "instances": vertex_req.instances,
+                "parameters": vertex_req.parameters,
+                "rid": vertex_req.rid,
+                "http_worker_ipc": vertex_req.http_worker_ipc,
+            }
+
+        operation = app.openapi()["paths"]["/vertex_generate"]["post"]
+        self.assertIn("requestBody", operation)
+        self.assertNotIn("parameters", operation)
+        openapi_schema = app.openapi()["components"]["schemas"][
+            "VertexGenerateReqInput"
+        ]
+        self.assertIn("instances", openapi_schema["properties"])
+        self.assertIn("parameters", openapi_schema["properties"])
+        self.assertIn("rid", openapi_schema["properties"])
+
+        client = TestClient(app)
+        response = client.post(
+            "/vertex_generate",
+            json={
+                "instances": [{"prompt": "hello"}],
+                "parameters": {"temperature": 0.1},
+                "rid": "request-id",
+                "http_worker_ipc": "worker-0",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "instances": [{"prompt": "hello"}],
+                "parameters": {"temperature": 0.1},
+                "rid": "request-id",
+                "http_worker_ipc": "worker-0",
+            },
+        )
+
+        response = client.post(
+            "/vertex_generate",
+            json={"parameters": {"temperature": 0.1}},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_new_base_req_types_round_trip_through_msgpack(self):
+        parse_req = ParseFunctionCallReq(
+            text="hello",
+            tools=[
+                Tool(
+                    function=Function(
+                        name="weather",
+                        parameters={"type": "object", "properties": {}},
+                    )
+                )
+            ],
+            rid="parse-rid",
+        )
+        rebuilt_parse_req = _msgpack_decoder.decode(_msgpack_encoder.encode(parse_req))
+
+        self.assertIsInstance(rebuilt_parse_req, ParseFunctionCallReq)
+        self.assertEqual(rebuilt_parse_req.rid, "parse-rid")
+        self.assertEqual(rebuilt_parse_req.tools[0].function.name, "weather")
+        self.assertEqual(
+            rebuilt_parse_req.tools[0].function.parameters,
+            {"type": "object", "properties": {}},
+        )
+
+        vertex_req = VertexGenerateReqInput(
+            instances=[{"prompt": "hello"}],
+            parameters={"temperature": 0.1},
+            rid="vertex-rid",
+        )
+        rebuilt_vertex_req = _msgpack_decoder.decode(
+            _msgpack_encoder.encode(vertex_req)
+        )
+
+        self.assertIsInstance(rebuilt_vertex_req, VertexGenerateReqInput)
+        self.assertEqual(rebuilt_vertex_req.rid, "vertex-rid")
+        self.assertEqual(rebuilt_vertex_req.instances, [{"prompt": "hello"}])
+        self.assertEqual(rebuilt_vertex_req.parameters, {"temperature": 0.1})
 
 
 if __name__ == "__main__":

@@ -1561,7 +1561,9 @@ async def abort_request(obj: Annotated[AbortReq, Body()], request: Request):
 
 
 @app.post("/parse_function_call")
-async def parse_function_call_request(obj: ParseFunctionCallReq, request: Request):
+async def parse_function_call_request(
+    obj: Annotated[ParseFunctionCallReq, Body()], request: Request
+):
     """
     A native API endpoint to parse function calls from a text.
     """
@@ -1971,7 +1973,9 @@ async def sagemaker_chat_completions(
 
 ## Vertex AI API
 @app.post(os.environ.get("AIP_PREDICT_ROUTE", "/vertex_generate"))
-async def vertex_generate(vertex_req: VertexGenerateReqInput, raw_request: Request):
+async def vertex_generate(
+    vertex_req: Annotated[VertexGenerateReqInput, Body()], raw_request: Request
+):
     if not vertex_req.instances:
         return []
     inputs = {}
