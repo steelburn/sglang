@@ -15,6 +15,7 @@ maybe_stub_sgl_kernel()
 from sglang.srt.managers.io_struct import (  # noqa: E402
     AbortReq,
     BaseReq,
+    SetInternalStateReq,
     UpdateWeightFromDiskReqInput,
 )
 
@@ -156,6 +157,31 @@ class TestHttpMsgspecReqInput(CustomTestCase):
         response = client.post(
             "/update_weights_from_disk",
             json={"load_format": "auto"},
+        )
+        self.assertEqual(response.status_code, 422)
+
+    def test_set_internal_state_req_uses_direct_body(self):
+        app = FastAPI()
+
+        @app.post("/set_internal_state")
+        def set_internal_state(obj: Annotated[SetInternalStateReq, Body()]):
+            return {"server_args": obj.server_args}
+
+        client = TestClient(app)
+        response = client.post(
+            "/set_internal_state",
+            json={"server_args": {"pp_max_micro_batch_size": 8}},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"server_args": {"pp_max_micro_batch_size": 8}},
+        )
+
+        response = client.post(
+            "/set_internal_state",
+            json={"obj": {"server_args": {"pp_max_micro_batch_size": 8}}},
         )
         self.assertEqual(response.status_code, 422)
 

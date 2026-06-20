@@ -747,7 +747,7 @@ async def get_load():
 @app.api_route("/set_internal_state", methods=["POST", "PUT"])
 @auth_level(AuthLevel.ADMIN_OPTIONAL)
 async def set_internal_state(
-    obj: Annotated[SetInternalStateReq, Body(embed=True)], request: Request
+    obj: Annotated[SetInternalStateReq, Body()], request: Request
 ):
     res = await _global_state.tokenizer_manager.set_internal_state(obj)
     return res
