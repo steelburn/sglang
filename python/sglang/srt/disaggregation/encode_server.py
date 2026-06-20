@@ -49,6 +49,7 @@ from sglang.srt.managers.io_struct import (
     ProfileReqInput,
     ProfileReqType,
     async_sock_recv,
+    async_sock_send,
     sock_send,
 )
 from sglang.srt.managers.schedule_batch import Modality, MultimodalDataItem
@@ -2738,7 +2739,7 @@ class DPDispatcher:
         )
 
         try:
-            await self.dispatch_sockets[rank].send_pyobj(request)
+            await async_sock_send(self.dispatch_sockets[rank], request)
             # An alive-but-stuck worker (NCCL deadlock etc.) wouldn't trip
             # the watchdog, so bound the wait explicitly.
             return await asyncio.wait_for(future, timeout=ENCODER_REQ_TIMEOUT)
@@ -2787,7 +2788,7 @@ class DPDispatcher:
             f"dp_rank={rank}, pending={self.pending_counts}"
         )
         try:
-            await self.dispatch_sockets[rank].send_pyobj(request)
+            await async_sock_send(self.dispatch_sockets[rank], request)
             return await asyncio.wait_for(future, timeout=ENCODER_REQ_TIMEOUT)
         except asyncio.TimeoutError:
             self.pending_futures[rank].pop(key, None)
@@ -2828,7 +2829,7 @@ class DPDispatcher:
                 self.req_id_to_rank[req_id] = rank
                 rank_keys.append((rank, req_id))
                 request_copy = {**request, "req_id": req_id}
-                await self.dispatch_sockets[rank].send_pyobj(request_copy)
+                await async_sock_send(self.dispatch_sockets[rank], request_copy)
                 futures.append(future)
             # Concurrent wait → total bounded by eff_timeout, not
             # dp_size × eff_timeout.
@@ -2908,7 +2909,7 @@ class DPDispatcher:
         consecutive_errors = 0
         while True:
             try:
-                msg = await self.result_socket.recv_pyobj()
+                msg = await async_sock_recv(self.result_socket)
                 consecutive_errors = 0
             except asyncio.CancelledError:
                 raise
@@ -3058,10 +3059,9 @@ async def _dp_worker_handle_request(
             "_error_code": err_code,
         }
 
-    # pyzmq async send_pyobj isn't safe for concurrent senders.
     try:
         async with send_lock:
-            await send_sock.send_pyobj(envelope)
+            await async_sock_send(send_sock, envelope)
     except Exception:
         logger.error(
             f"DP worker {dp_rank} failed to send envelope for "
@@ -3120,7 +3120,7 @@ async def run_dp_worker(
             spawned = False
             try:
                 try:
-                    request = await recv_sock.recv_pyobj()
+                    request = await async_sock_recv(recv_sock)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
