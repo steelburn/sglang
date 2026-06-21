@@ -260,9 +260,11 @@ class ReqTimeStatsBase(msgspec.Struct, kw_only=True, tag=True):
         new_obj = cls(*args, **kwargs)
         if obj is None:
             return new_obj
-        for key, value in msgspec.structs.asdict(obj).items():
-            if hasattr(new_obj, key):
-                setattr(new_obj, key, value)
+        new_fields = {field.name for field in msgspec.structs.fields(type(new_obj))}
+        for field in msgspec.structs.fields(type(obj)):
+            key = field.name
+            if key in new_fields:
+                setattr(new_obj, key, getattr(obj, key))
 
         if new_obj.trace_ctx.tracing_enable:
             new_obj.trace_ctx.rebuild_thread_context()

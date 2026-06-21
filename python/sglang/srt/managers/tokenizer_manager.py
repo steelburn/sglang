@@ -601,8 +601,6 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
                     f"routed_dp_rank={obj.routed_dp_rank} out of range [0, {dp_size})"
                 )
 
-        if self.server_args.tokenizer_worker_num > 1:
-            _attach_multi_http_worker_info(obj, self.tokenizer_ipc_name)
         self._init_req_state(obj, request)
         if self.server_args.language_only:
             self._handle_epd_disaggregation_encode_request(obj)
@@ -1732,7 +1730,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
     async def _wait_for_model_update_from_disk(
         self, obj: UpdateWeightFromDiskReqInput
     ) -> Tuple[bool, str]:
-        await self.send_to_scheduler.async_send_obj(obj)
+        self.send_to_scheduler.send_obj(obj)
         self.model_update_result = asyncio.Future()
         if self.server_args.dp_size == 1:
             result = await self.model_update_result
@@ -1777,7 +1775,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
 
     async def freeze_gc(self):
         """Send a freeze_gc message to the scheduler first, then freeze locally."""
-        await self.send_to_scheduler.async_send_obj(FreezeGCReq())
+        self.send_to_scheduler.send_obj(FreezeGCReq())
         freeze_gc("Tokenizer Manager")
         return None
 
@@ -3097,16 +3095,6 @@ class SignalHandler:
 #
 
 
-def _attach_multi_http_worker_info(req: Any, tokenizer_ipc_name: str):
-    if isinstance(req, (GenerateReqInput, EmbeddingReqInput, BaseReq)):
-        req.http_worker_ipc = tokenizer_ipc_name
-    elif isinstance(req, BaseBatchReq):
-        req_len = len(req.rids) if req.rids is not None else len(req)
-        req.http_worker_ipcs = [tokenizer_ipc_name] * req_len
-    else:
-        raise ValueError(f"Unknown req type: {type(req)}")
-
-
 def _wrap_multimodal_payload_for_ipc(
     tokenized_obj: Union[TokenizedGenerateReqInput, TokenizedEmbeddingReqInput],
 ):
@@ -3129,12 +3117,20 @@ class SenderWrapper:
         self.send_to_scheduler = send_to_scheduler
         self.attach_multi_http_worker_info = attach_multi_http_worker_info
 
+    def _stamp_http_worker_ipc(self, obj):
+        if not self.attach_multi_http_worker_info:
+            return
+        ipc_name = self.port_args.tokenizer_ipc_name
+        if isinstance(obj, BaseReq):
+            obj.http_worker_ipc = ipc_name
+        elif isinstance(obj, BaseBatchReq):
+            for item in obj:
+                item.http_worker_ipc = ipc_name
+
     def send_obj(self, obj):
-        if self.attach_multi_http_worker_info and isinstance(obj, BaseReq):
-            obj.http_worker_ipc = self.port_args.tokenizer_ipc_name
+        self._stamp_http_worker_ipc(obj)
         sock_send(self.send_to_scheduler, obj)
 
     async def async_send_obj(self, obj):
-        if self.attach_multi_http_worker_info and isinstance(obj, BaseReq):
-            obj.http_worker_ipc = self.port_args.tokenizer_ipc_name
+        self._stamp_http_worker_ipc(obj)
         await async_sock_send(self.send_to_scheduler, obj)

@@ -871,7 +871,7 @@ class TokenizerControlMixin:
 
         future = asyncio.Future()
         self.session_futures[obj.session_id] = future
-        await self.send_to_scheduler.async_send_obj(obj)
+        self.send_to_scheduler.send_obj(obj)
 
         try:
             return await future
@@ -902,13 +902,26 @@ def _looks_like_pickle_payload(data: bytes) -> bool:
 
 
 def _decode_serialized_named_tensor_payload(data: Any) -> Any:
+    """Normalize a single serialized tensor payload to raw pickle bytes.
+
+    Three entry paths produce different representations:
+      1. In-process Engine (engine.py) — raw pickle bytes. Detected by the
+         pickle magic header (0x80 + protocol), returned as-is.
+      2. HTTP JSON (FastAPI Body) — msgspec auto-base64-decodes the JSON
+         string into raw pickle bytes before we see it, so same as (1).
+      3. Pydantic / HttpServerEngine — Pydantic coerces a base64 str to
+         bytes via UTF-8 encode (does NOT base64-decode), so the bytes are
+         still base64-encoded. Caught by the b64decode fallback below.
+    """
     if isinstance(data, str):
         return pybase64.b64decode(data, validate=True)
 
     if isinstance(data, (bytes, bytearray, memoryview)):
         data = bytes(data)
+        # Paths (1) and (2): already raw pickle bytes.
         if _looks_like_pickle_payload(data):
             return data
+        # Path (3): base64 content as bytes — decode to raw pickle.
         try:
             return pybase64.b64decode(data, validate=True)
         except (binascii.Error, ValueError):

@@ -284,7 +284,7 @@ class TraceReqContext(msgspec.Struct, tag=True):
     # Optional[trace.span.SpanContext]
     last_span_context: Optional[TraceSpanContext] = None
     external_trace_header: Optional[Dict[str, str]] = None
-    events_cache: List[TraceEvent] = []
+    events_cache: List[TraceEvent] = msgspec.field(default_factory=list)
 
     def __post_init__(self):
         self.rid = str(self.rid)

@@ -60,10 +60,7 @@ from sglang.srt.managers.load_snapshot import (
     create_load_snapshot_reader,
     zmq_reader_owner,
 )
-from sglang.srt.managers.tokenizer_manager import (
-    TokenizerManager,
-    _attach_multi_http_worker_info,
-)
+from sglang.srt.managers.tokenizer_manager import TokenizerManager
 from sglang.srt.server_args import PortArgs, ServerArgs
 from sglang.srt.utils import (
     configure_logger,
@@ -674,10 +671,6 @@ class TokenizerWorker(TokenizerManager):
         if self._pause_continue_future and not self._pause_continue_future.done():
             self._pause_continue_future.set_result(True)
             self._pause_continue_future = None
-
-    def _attach_multi_http_worker_info(self, req: Any):
-        _attach_multi_http_worker_info(req, self.tokenizer_ipc_name)
-
 
 async def print_exception_wrapper(func):
     """
