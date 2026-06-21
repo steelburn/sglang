@@ -162,6 +162,9 @@ MultimodalDataInputFormat = Union[
     MultimodalDataInputItem,
 ]
 
+# Serialized form of BaseFinishReason.to_json() — all values are primitives.
+FinishReasonDict = Dict[str, Optional[Union[str, int, List[int]]]]
+
 @dataclass
 class GenerateReqInput:
     # Request ID(s). If omitted, generated during normalization. For batch
@@ -1181,7 +1184,7 @@ OutputHiddenStates = Optional[List[Optional[List[HiddenStateChunk]]]]
 
 class BatchTokenIDOutput(BaseBatchReq, kw_only=True):
     # The finish reason
-    finished_reasons: List[Optional[Dict[str, Any]]]  # List[BaseFinishReason]
+    finished_reasons: List[Optional[FinishReasonDict]]
     # For incremental decoding
     decoded_texts: List[str]
     decode_ids: List[array]  # List[array[int]]
@@ -1269,7 +1272,7 @@ class BatchTokenIDOutput(BaseBatchReq, kw_only=True):
 
 class BatchStrOutput(BaseBatchReq, kw_only=True):
     # The finish reason
-    finished_reasons: List[Optional[Dict[str, Any]]]  # List[dict]
+    finished_reasons: List[Optional[FinishReasonDict]]
     # The output decoded strings
     output_strs: List[str]
     # The token ids
@@ -1350,7 +1353,7 @@ class BatchStrOutput(BaseBatchReq, kw_only=True):
 
 class BatchEmbeddingOutput(BaseBatchReq, kw_only=True):
     # The finish reason
-    finished_reasons: List[Optional[Dict[str, Any]]]  # List[BaseFinishReason]
+    finished_reasons: List[Optional[FinishReasonDict]]
     # The output embedding
     embeddings: List[Union[List[Union[float, List[float]]], Dict[int, float], float]]
     # Token counts
@@ -1738,8 +1741,8 @@ class SlowDownReqOutput(BaseReq, kw_only=True):
 class AbortReq(BaseReq, kw_only=True):
     # Whether to abort all requests
     abort_all: bool = False
-    # The finished reason data
-    finished_reason: Optional[Dict[str, Any]] = None
+    # The finished reason data (from BaseFinishReason.to_json())
+    finished_reason: Optional[FinishReasonDict] = None
     abort_message: Optional[str] = None
 
     def __post_init__(self):
