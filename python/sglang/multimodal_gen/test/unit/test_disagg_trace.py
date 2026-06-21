@@ -167,7 +167,7 @@ class TestDisaggTracePropagation(unittest.TestCase):
             decoded = _roundtrip_scalar_fields(scalar_fields)
             self.assertEqual(decoded["_trace_state"], state)
 
-            rebuilt = TraceReqContext(rid="")
+            rebuilt = object.__new__(TraceReqContext)
             rebuilt.__setstate__(decoded["_trace_state"])
             self.assertTrue(rebuilt.tracing_enable)
             self.assertTrue(rebuilt.is_copy)
