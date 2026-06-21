@@ -887,7 +887,9 @@ class TokenizedGenerateReqInput(BaseReq, kw_only=True):
     multi_item_delimiter_indices: Optional[List[int]] = None
 
     # For observability
-    time_stats: Optional[PickleWrapper] = None  # Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]]
+    time_stats: Optional[PickleWrapper] = (
+        None  # APIServerReqTimeStats | DPControllerReqTimeStats | None
+    )
 
 
 class BatchTokenizedGenerateReqInput(BaseBatchReq, kw_only=True):
@@ -1175,7 +1177,9 @@ class TokenizedEmbeddingReqInput(BaseReq, kw_only=True):
     multi_item_delimiter_indices: Optional[List[int]] = None
 
     # For observability
-    time_stats: Optional[PickleWrapper] = None  # Optional[Union[APIServerReqTimeStats, DPControllerReqTimeStats]]
+    time_stats: Optional[PickleWrapper] = (
+        None  # APIServerReqTimeStats | DPControllerReqTimeStats | None
+    )
 
 
 class BatchTokenizedEmbeddingReqInput(BaseBatchReq, kw_only=True):
