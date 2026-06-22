@@ -61,7 +61,7 @@ def raise_if_tokenizer_required(
         )
 
 
-class SamplingParams(msgspec.Struct, kw_only=True):
+class SamplingParams(msgspec.Struct, kw_only=True, array_like=True):
     """
     The sampling parameters.
 
