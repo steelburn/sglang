@@ -129,8 +129,13 @@ class CompressedTensorsWNA16MoE(CompressedTensorsMoEScheme):
         set_weight_attrs(w2_weight, extra_weight_attrs)
 
         # In the case where we have actorder/g_idx,
-        # we do not partition the w2 scales
-        load_full_w2 = (self.actorder != "static") and self.group_size != -1
+        # we do not partition the w2 scales.
+        actorder = getattr(self.actorder, "value", self.actorder)
+        if isinstance(actorder, str):
+            actorder = actorder.lower()
+        load_full_w2 = (
+            actorder not in (None, False, "", "static") and self.group_size != -1
+        )
 
         if load_full_w2:
             w2_scales_size = intermediate_size_per_partition * layer.moe_tp_size
