@@ -2669,7 +2669,7 @@ class TokenizerManager(TokenizerControlMixin, TokenizerManagerScoreMixin):
             self._subprocess_watchdog.stop()
         # Ask schedulers to release resources in userspace and exit (see
         # ShutdownReq), then wait for them before hard-killing the rest.
-        self.send_to_scheduler.send_pyobj(ShutdownReq())
+        self.send_to_scheduler.send_obj(ShutdownReq())
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline and collect_scheduler_processes():
             time.sleep(0.1)
