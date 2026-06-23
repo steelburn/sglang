@@ -1,10 +1,13 @@
 import unittest
+import uuid
 import warnings
 from array import array
 from typing import Any
+from unittest.mock import patch
 
 import numpy as np
 import torch
+import zmq
 
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase, maybe_stub_sgl_kernel
@@ -20,6 +23,8 @@ from sglang.srt.managers.io_struct import (  # noqa: E402
     hook_custom_types,
     msgpack_decode,
     msgpack_encode,
+    sock_recv,
+    sock_send,
     unwrap_from_pickle,
     wrap_as_pickle,
 )
@@ -46,6 +51,22 @@ hook_custom_types(MsgpackPayload, UnsupportedNestedPayload)
 
 
 class TestIoStructMsgpack(CustomTestCase):
+    def _socket_round_trip(self, payload):
+        ctx = zmq.Context.instance()
+        addr = f"inproc://io-struct-{uuid.uuid4()}"
+        receiver = ctx.socket(zmq.PAIR)
+        sender = ctx.socket(zmq.PAIR)
+        receiver.linger = 0
+        sender.linger = 0
+        receiver.bind(addr)
+        sender.connect(addr)
+        try:
+            sock_send(sender, payload)
+            return sock_recv(receiver)
+        finally:
+            sender.close(0)
+            receiver.close(0)
+
     def test_supported_custom_payload_round_trip(self):
         payload = MsgpackPayload(
             tensor=torch.arange(12, dtype=torch.float32).reshape(3, 4).t()[1:],
@@ -92,26 +113,61 @@ class TestIoStructMsgpack(CustomTestCase):
 
     def test_explicit_pickle_wrapper_field_round_trip(self):
         time_stats = APIServerReqTimeStats()
-        req = TokenizedGenerateReqInput(
-            rid="rid-trace",
-            input_text="hello",
-            input_ids=array("l", [1, 2, 3]),
-            mm_inputs=None,
-            sampling_params=SamplingParams(max_new_tokens=4),
-            return_logprob=False,
-            logprob_start_len=0,
-            top_logprobs_num=0,
-            token_ids_logprob=None,
-            stream=False,
-            time_stats=wrap_as_pickle(time_stats),
-        )
+        with patch("sglang.srt.managers.io_struct._USE_PICKLE_IPC", False):
+            req = TokenizedGenerateReqInput(
+                rid="rid-trace",
+                input_text="hello",
+                input_ids=array("l", [1, 2, 3]),
+                mm_inputs=None,
+                sampling_params=SamplingParams(max_new_tokens=4),
+                return_logprob=False,
+                logprob_start_len=0,
+                top_logprobs_num=0,
+                token_ids_logprob=None,
+                stream=False,
+                time_stats=wrap_as_pickle(time_stats),
+            )
 
-        rebuilt = msgpack_decode(msgpack_encode(req))
+            rebuilt = msgpack_decode(msgpack_encode(req))
 
-        self.assertIsInstance(rebuilt.time_stats, PickleWrapper)
-        self.assertIsInstance(
-            unwrap_from_pickle(rebuilt.time_stats), APIServerReqTimeStats
-        )
+            self.assertIsInstance(rebuilt.time_stats, PickleWrapper)
+            self.assertIsInstance(
+                unwrap_from_pickle(rebuilt.time_stats), APIServerReqTimeStats
+            )
+
+    def test_pickle_ipc_wrap_helpers_skip_nested_pickle(self):
+        time_stats = APIServerReqTimeStats()
+
+        with patch("sglang.srt.managers.io_struct._USE_PICKLE_IPC", True):
+            wrapped = wrap_as_pickle(time_stats)
+            unwrapped = unwrap_from_pickle(wrapped)
+
+        self.assertIs(wrapped, time_stats)
+        self.assertIs(unwrapped, time_stats)
+
+    def test_pickle_ipc_protocol_round_trip(self):
+        time_stats = APIServerReqTimeStats()
+
+        with patch("sglang.srt.managers.io_struct._USE_PICKLE_IPC", True):
+            req = TokenizedGenerateReqInput(
+                rid="rid-pickle-ipc",
+                input_text="hello",
+                input_ids=array("l", [1, 2, 3]),
+                mm_inputs=None,
+                sampling_params=SamplingParams(max_new_tokens=4, stop_token_ids=[1, 2]),
+                return_logprob=False,
+                logprob_start_len=0,
+                top_logprobs_num=0,
+                token_ids_logprob=None,
+                stream=False,
+                time_stats=wrap_as_pickle(time_stats),
+            )
+            rebuilt = self._socket_round_trip(req)
+
+        self.assertIsInstance(rebuilt, TokenizedGenerateReqInput)
+        self.assertIsInstance(rebuilt.sampling_params, SamplingParams)
+        self.assertEqual(rebuilt.sampling_params.stop_token_ids, {1, 2})
+        self.assertIsInstance(rebuilt.time_stats, APIServerReqTimeStats)
 
 
 if __name__ == "__main__":
