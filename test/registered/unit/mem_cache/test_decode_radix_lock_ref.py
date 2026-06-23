@@ -54,11 +54,11 @@ def _unfinish(cache, req, chunked=False):
             extra_key=req.extra_key,
             kv_indices=kv_indices,
             req_pool_idx=req.req_pool_idx,
-            prev_prefix_len=req.cache_protected_len,
+            prev_prefix_len=req.cache.cache_protected_len,
             prefix_indices_len=len(req.prefix_indices),
             priority=getattr(req, "priority", 0) or 0,
             chunked=chunked,
-            last_node=req.last_node,
+            last_node=req.cache.last_node,
             req=req,
         )
     )
@@ -67,14 +67,14 @@ def _unfinish(cache, req, chunked=False):
     if result.prefix_indices is not None:
         req.prefix_indices = result.prefix_indices
     if result.cache_protected_len is not None:
-        req.cache_protected_len = result.cache_protected_len
+        req.cache.cache_protected_len = result.cache_protected_len
     if result.lock_handover:
-        req.last_node = result.last_node
+        req.cache.last_node = result.last_node
 
 
 def _finish(cache, req, is_insert=True):
     kv_committed_len = req.kv_committed_len
-    owned_start = req.cache_protected_len
+    owned_start = req.cache.cache_protected_len
     kv_indices = cache.req_to_token_pool.req_to_token[
         req.req_pool_idx, :kv_committed_len
     ]
@@ -88,7 +88,7 @@ def _finish(cache, req, is_insert=True):
             prefix_indices_len=len(req.prefix_indices),
             priority=getattr(req, "priority", 0) or 0,
             is_insert=is_insert,
-            last_node=req.last_node,
+            last_node=req.cache.last_node,
             req=req,
         )
     )
