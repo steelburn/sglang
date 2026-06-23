@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from enum import Enum, auto
 from typing import Any, List, Optional
 
-from sglang.srt.managers.io_struct import BlockReqInput, BlockReqType
+from sglang.srt.managers.io_struct import BlockReqInput, BlockReqType, sock_send
 from sglang.srt.utils.poll_based_barrier import PollBasedBarrier
 
 logger = logging.getLogger(__name__)

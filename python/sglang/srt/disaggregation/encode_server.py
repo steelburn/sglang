@@ -3053,6 +3053,7 @@ async def _dp_worker_handle_request(
             "_error_code": err_code,
         }
 
+    # pyzmq async send isn't safe for concurrent senders.
     try:
         async with send_lock:
             await async_sock_send(send_sock, envelope)
