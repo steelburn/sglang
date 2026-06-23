@@ -242,6 +242,8 @@ class MlxAuxiliaryStateReqToTokenPool(ReqToTokenPool):
                     mamba_last_track_seqlen=None,
                     mamba_branching_seqlen=None,
                 )
+            if req.mamba_branching_seqlen_pending is not None:
+                req.mamba.mamba_branching_seqlen = req.mamba_branching_seqlen_pending
             auxiliary_state_indices.append(mid.to(dtype=torch.int32))
         self.req_index_to_auxiliary_state_index_mapping[select_index] = torch.stack(
             auxiliary_state_indices

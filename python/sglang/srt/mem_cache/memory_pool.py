@@ -775,7 +775,9 @@ class HybridReqToTokenPool(ReqToTokenPool):
                     mamba_last_track_seqlen=None,
                     mamba_branching_seqlen=None,
                 )
-                req.mamba_needs_clear = True
+                req.mamba_needs_clear = req.mamba_cow_src_index is None
+            if req.mamba_branching_seqlen_pending is not None:
+                req.mamba.mamba_branching_seqlen = req.mamba_branching_seqlen_pending
             mamba_indices.append(req.mamba.mamba_pool_idx)
             if self.enable_mamba_extra_buffer:
                 if req.mamba.mamba_ping_pong_track_buffer is None:

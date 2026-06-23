@@ -813,6 +813,7 @@ class Req(ReqDllmMixin):
         self.mamba: Optional[ReqMambaInfo] = None
         # Deferred COW: source mamba pool index from radix cache node (copy on forward stream)
         self.mamba_cow_src_index: Optional[torch.Tensor] = None
+        self.mamba_branching_seqlen_pending: Optional[int] = None
         # Deferred clear: newly allocated mamba slot needs zeroing on forward stream
         self.mamba_needs_clear: bool = False
         # Lazy extra buffer: skip radix cache insert when prealloc failed at
@@ -1188,11 +1189,9 @@ class Req(ReqDllmMixin):
                 match_result.swa_host_hit_length,
                 match_result.mamba_host_hit_length,
             )
-            if (
-                match_result.mamba_branching_seqlen is not None
-                and self.mamba is not None
-            ):
-                self.mamba.mamba_branching_seqlen = match_result.mamba_branching_seqlen
+            self.mamba_branching_seqlen_pending = match_result.mamba_branching_seqlen
+            if cow_mamba:
+                self.mamba_cow_src_index = match_result.mamba_cow_src
             if match_result.cache_protected_len is not None:
                 self.cache.cache_protected_len = match_result.cache_protected_len
             else:
@@ -1453,6 +1452,7 @@ class Req(ReqDllmMixin):
         self.inflight_middle_chunks = 0
         assert self.mamba is None, "expect it is already released"
         self.mamba_cow_src_index = None
+        self.mamba_branching_seqlen_pending = None
         self.mamba_needs_clear = False
         self.already_computed = 0
         assert self.kv is None, "expect it is already released"
