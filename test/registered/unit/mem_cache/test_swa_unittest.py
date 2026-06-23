@@ -32,9 +32,8 @@ register_amd_ci(est_time=10, suite="stage-b-test-1-gpu-small-amd")
 class _DummyReq:
     def __init__(self):
         self._kv_committed_len = 0
-        self.cache_protected_len = 0
-        self.last_node = None
         self.cache = SimpleNamespace(
+            cache_protected_len=0,
             last_node=None,
             swa_uuid_for_lock=None,
             swa_prefix_lock_released=False,
@@ -58,11 +57,11 @@ def _finish(tree, req, is_insert=True):
             extra_key=req.extra_key,
             kv_indices=kv_indices,
             kv_committed_len=kv_committed_len,
-            prev_prefix_len=req.cache_protected_len,
+            prev_prefix_len=req.cache.cache_protected_len,
             prefix_indices_len=len(req.prefix_indices),
             swa_evicted_seqlen=req.kv.swa_evicted_seqlen,
             is_insert=is_insert,
-            last_node=req.last_node,
+            last_node=req.cache.last_node,
             swa_uuid_for_lock=req.cache.swa_uuid_for_lock,
             swa_prefix_lock_released=req.cache.swa_prefix_lock_released,
             req=req,
