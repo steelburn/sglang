@@ -546,14 +546,14 @@ class RadixCache(SessionRadixCacheMixin, KVCacheEventMixin, BasePrefixCache):
         else:
             new_prefix_indices = new_indices
 
+        self._tag_session_leaf(params.req, radix_key, node=new_last_node)
+
         return UnfinishResult(
             prefix_indices=new_prefix_indices,
             cache_protected_len=new_cache_protected_len,
             lock_handover=True,
             last_node=new_last_node,
         )
-
-        self._tag_session_leaf(req, radix_key, node=new_last_node)
 
     def pretty_print(self):
         self._print_helper(self.root_node, 0)
