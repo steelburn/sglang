@@ -3522,9 +3522,13 @@ def parse_module_path(module_path, function_name, create_dummy):
     return final_module, None
 
 
+# MXFP4 is a CDNA4‑only feature. This helper intentionally returns ``False`` on
+# RDNA3 GPUs (e.g. ``gfx1151``) because those devices do not support MXFP4.
 def mxfp_supported():
-    """
-    Returns whether the current platform supports MX types.
+    """Return whether the current platform supports MX types.
+
+    On ROCm, MXFP4 is only available on CDNA4 (gfx95) GPUs. For RDNA3 GPUs such
+    as ``gfx1151`` this function deliberately returns ``False``.
     """
     if torch.version.hip:
         gcn_arch = torch.cuda.get_device_properties(0).gcnArchName
@@ -3534,13 +3538,29 @@ def mxfp_supported():
 
 
 @lru_cache(maxsize=1)
+# NOTE: ``gfx1151`` (RDNA3) does **not** support MXFP4. This helper mirrors
+# ``mxfp_supported`` and therefore returns ``False`` for RDNA3 hardware.
 def is_gfx95_supported():
-    """
-    Returns whether the current platform supports MX types.
+    """Return whether the current platform supports MX types (gfx95).
+
+    The check is limited to ``gfx95``; on RDNA3 GPUs (e.g. ``gfx1151``) this
+    function returns ``False``.
     """
     if torch.version.hip:
         gcn_arch = torch.cuda.get_device_properties(0).gcnArchName
         return any(gfx in gcn_arch for gfx in ["gfx95"])
+    else:
+        return False
+
+@lru_cache(maxsize=1)
+def is_gfx11_supported() -> bool:
+    """Return whether the current platform supports gfx11 (e.g., RDNA3 ``gfx1151``).
+
+    This checks the ``gcnArchName`` for the substring ``"gfx11"``.
+    """
+    if torch.version.hip:
+        gcn_arch = torch.cuda.get_device_properties(0).gcnArchName
+        return any(gfx in gcn_arch for gfx in ["gfx11"])
     else:
         return False
 

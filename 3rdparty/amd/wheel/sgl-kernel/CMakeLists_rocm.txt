@@ -66,8 +66,10 @@ if(AMDGPU_TARGETS MATCHES "gfx950")
   message(STATUS "Multi-arch build: Enabling both HIP_FP8_TYPE_FNUZ (gfx942) and HIP_FP8_TYPE_E4M3 (gfx950)")
 elseif(AMDGPU_TARGETS MATCHES "gfx942")
   message(STATUS "Single-arch build: Enabling HIP_FP8_TYPE_FNUZ for gfx942")
+elseif(AMDGPU_TARGETS MATCHES "gfx1151")
+  message(STATUS "Single-arch build: Enabling HIP_FP8_TYPE_FNUZ for gfx1151")
 else()
-  message(FATAL_ERROR "Unsupported AMDGPU_TARGET '${AMDGPU_TARGETS}'. Expected 'gfx942' or 'gfx950' or both.")
+  message(FATAL_ERROR "Unsupported AMDGPU_TARGET '${AMDGPU_TARGETS}'. Expected 'gfx942', 'gfx950', or 'gfx1151'.")
 endif()
 
 # TopK dynamic smem bytes
@@ -75,7 +77,7 @@ endif()
 # - gfx942 (MI300/MI325): LDS is typically 64KB per workgroup -> keep dynamic smem <= ~48KB
 #   (leaves room for static shared allocations in the kernel).
 # - gfx95x (MI350): LDS is larger (e.g. 160KB per CU) -> allow the original 128KB dynamic smem.
-if(AMDGPU_TARGET_ONE STREQUAL "gfx942")
+if(AMDGPU_TARGETS MATCHES "gfx942|gfx1151")
   math(EXPR SGL_TOPK_DYNAMIC_SMEM_BYTES "48 * 1024")
 else()
   math(EXPR SGL_TOPK_DYNAMIC_SMEM_BYTES "32 * 1024 * 4")
