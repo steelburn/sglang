@@ -74,7 +74,7 @@ def _unfinish(cache, req, chunked=False):
 
 def _finish(cache, req, is_insert=True):
     kv_committed_len = req.kv_committed_len
-    owned_start = req.cache_protected_len
+    owned_start = req.cache.cache_protected_len
     kv_indices = cache.req_to_token_pool.req_to_token[
         req.req_pool_idx, :kv_committed_len
     ]
@@ -88,7 +88,7 @@ def _finish(cache, req, is_insert=True):
             prefix_indices_len=len(req.prefix_indices),
             priority=getattr(req, "priority", 0) or 0,
             is_insert=is_insert,
-            last_node=req.last_node,
+            last_node=req.cache.last_node,
             req=req,
         )
     )
