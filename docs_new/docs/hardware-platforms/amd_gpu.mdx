@@ -51,6 +51,8 @@ cd sglang
 # Compile sgl-kernel
 pip install --upgrade pip
 cd sgl-kernel
+# Set your GPU architecture: gfx942 (MI300), gfx950 (MI350), or gfx1151 (RDNA3)
+export AMDGPU_TARGET=gfx1151
 python setup_rocm.py install
 
 # Install sglang python package along with diffusion support
