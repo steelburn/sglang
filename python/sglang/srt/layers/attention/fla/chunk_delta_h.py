@@ -100,13 +100,13 @@ def chunk_gated_delta_rule_fwd_kernel_h_blockdim64(
     stride_k = Hg * K
     stride_w = H * K
 
-    index = tl.load(initial_state_indices + i_n).to(tl.int32)
-    h0 = initial_state + index * stride_h
-    ht = initial_state + index * stride_h
     if USE_INITIAL_STATE:
+        index = tl.load(initial_state_indices + i_n).to(tl.int32)
+        h0 = initial_state + index * stride_h
         h0 = h0 + i_h * V * K
-    if INPLACE_UPDATE:
-        ht = ht + i_h * V * K
+        if INPLACE_UPDATE:
+            ht = initial_state + index * stride_h
+            ht = ht + i_h * V * K
 
     # load initial state
     if USE_INITIAL_STATE:
@@ -316,6 +316,18 @@ def chunk_gated_delta_rule_fwd_h(
     def grid(meta):
         return (triton.cdiv(V, meta["BV"]), N * H)
 
+    # When initial_state is None, pass dummy tensors to satisfy Triton's
+    # compile-time parsing (ROCm Triton doesn't dead-code-eliminate
+    # conditional branches before parsing like CUDA Triton does).
+    _initial_state = initial_state
+    _initial_state_indices = initial_state_indices
+    if _initial_state is None:
+        _initial_state = k.new_empty(0)
+        _initial_state_indices = k.new_empty(0, dtype=torch.int64)
+    elif _initial_state_indices is None:
+        # initial_state provided but no indices; create dummy placeholder
+        _initial_state_indices = torch.zeros(1, dtype=torch.int64, device=k.device)
+
     chunk_gated_delta_rule_fwd_kernel_h_blockdim64[grid](
         k=k,
         v=u,
@@ -324,8 +336,8 @@ def chunk_gated_delta_rule_fwd_h(
         g=g,
         gk=gk,
         h=h,
-        initial_state=initial_state,
-        initial_state_indices=initial_state_indices,
+        initial_state=_initial_state,
+        initial_state_indices=_initial_state_indices,
         cu_seqlens=cu_seqlens,
         chunk_offsets=chunk_offsets,
         T=T,
@@ -337,7 +349,7 @@ def chunk_gated_delta_rule_fwd_h(
         USE_G=g is not None,
         USE_GK=gk is not None,
         USE_INITIAL_STATE=initial_state is not None,
-        INPLACE_UPDATE=True,
+        INPLACE_UPDATE=initial_state is not None,
         SAVE_NEW_VALUE=v_new is not None,
         IS_VARLEN=cu_seqlens is not None,
         NT_BUCKET=(0 if NT <= 32 else (1 if NT <= 128 else 2)),
