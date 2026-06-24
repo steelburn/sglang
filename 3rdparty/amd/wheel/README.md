@@ -2,7 +2,7 @@
 
 Building and releasing `sglang-kernel` as a wheel is a part of the release workflow. Check [release-whl-kernel.yml](https://github.com/sgl-project/sglang/blob/main/.github/workflows/release-whl-kernel.yml) for details.
 
-> **Supported AMD GPU architectures:** `gfx942` (MI300/MI325), `gfx950` (MI350/MI355), `gfx1151` (RDNA3, e.g. Radeon 8060S).  
+> **Supported AMD GPU architectures:** `gfx942` (MI300/MI325), `gfx950` (MI350/MI355), `gfx1151` (RDNA3, e.g. Radeon 8060S).
 > Set `AMDGPU_TARGET` environment variable when building from source to select your target.
 
 # sglang

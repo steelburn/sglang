@@ -79,7 +79,9 @@ if amdgpu_target not in ["gfx942", "gfx950", "gfx1151"]:
     sys.exit(1)
 
 fp8_macro = (
-    "-DHIP_FP8_TYPE_FNUZ" if amdgpu_target in ["gfx942", "gfx1151"] else "-DHIP_FP8_TYPE_E4M3"
+    "-DHIP_FP8_TYPE_FNUZ"
+    if amdgpu_target in ["gfx942", "gfx1151"]
+    else "-DHIP_FP8_TYPE_E4M3"
 )
 
 # Dynamic shared-memory budget for the TopK kernels.

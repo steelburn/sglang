@@ -40,7 +40,7 @@ To build `sglang-kernel` for an AMD GPU, set the `AMDGPU_TARGET` environment var
 # For MI300/MI325 (CDNA3, gfx942)
 export AMDGPU_TARGET=gfx942
 
-# For MI350/MI355 (CDNA4, gfx950)  
+# For MI350/MI355 (CDNA4, gfx950)
 export AMDGPU_TARGET=gfx950
 
 # For RDNA3 consumer GPUs e.g. Radeon 8060S (gfx1151)

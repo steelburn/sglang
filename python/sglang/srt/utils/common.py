@@ -3552,6 +3552,7 @@ def is_gfx95_supported():
     else:
         return False
 
+
 @lru_cache(maxsize=1)
 def is_gfx11_supported() -> bool:
     """Return whether the current platform supports gfx11 (e.g., RDNA3 ``gfx1151``).
