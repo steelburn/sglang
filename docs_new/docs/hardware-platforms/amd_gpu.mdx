@@ -115,7 +115,41 @@ The steps below show how to build and use an image.
        --random-output 128
    ```
 
-With your AMD system properly configured and SGLang installed, you can now fully leverage AMD hardware to power SGLang’s machine learning capabilities.
+With your AMD system properly configured and SGLang installed, you can now fully leverage AMD hardware to power SGLang's machine learning capabilities.
+
+## RDNA 3 Consumer GPUs (gfx1151)
+
+SGLang supports AMD RDNA 3 consumer GPUs (e.g., Radeon 8060S, gfx1151) with the following considerations:
+
+- **Attention backend:** Use `--attention-backend torch_native` (FlashInfer is CUDA-only, AITER is CDNA-only).
+- **Sampling backend:** Use `--sampling-backend pytorch`.
+- **No RDMA/Mooncake:** Consumer GPUs lack the necessary interconnects for disaggregated serving.
+- **No MXFP4:** Requires CDNA3/CDNA4 hardware.
+- **Context length:** 256K+ context models work; use `--max-total-tokens` to manage KV cache memory.
+
+### Verified models
+
+These models have been tested and verified on gfx1151:
+
+| Model | Size | Architecture | Load Time | Inference |
+|---|---|---|---|---|
+| `Qwen/Qwen2.5-0.5B-Instruct` | 0.5B | Qwen2.5 | ~10s | ✅ |
+| `Qwen/Qwen3.5-4B` | 4B | Qwen3.5 hybrid (24 MLA + 8 full attn) | ~27s | ✅ 2.5s first token |
+| `Qwen/Qwen3.5-9B` | 9B | Qwen3.5 hybrid (24 MLA + 8 full attn) | ~35s | ✅ 4.8s first token |
+
+### Launch example
+
+```bash Command
+python3 -m sglang.launch_server \
+    --model-path Qwen/Qwen3.5-4B \
+    --attention-backend torch_native \
+    --sampling-backend pytorch \
+    --trust-remote-code \
+    --mem-fraction-static 0.45 \
+    --max-total-tokens 65536 \
+    --host 127.0.0.1 --port 30000
+```
+
 
 ## Quantization on AMD GPUs
 
