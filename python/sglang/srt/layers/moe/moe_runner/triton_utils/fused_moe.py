@@ -306,13 +306,17 @@ def fused_experts(
         )
 
 
-@torch.compile
+# torch.compile is not supported on ROCm (HIP); skip it there.
+_torch_compile = lambda f: f if is_hip() else torch.compile(f)
+
+
+@_torch_compile
 def moe_sum_reduce_torch_compile(x, out, routed_scaling_factor):
     torch.sum(x, dim=1, out=out)
     out.mul_(routed_scaling_factor)
 
 
-@torch.compile
+@_torch_compile
 def _swiglu_silu_clamp_mul(x, gemm1_limit):
     gate, up = x.chunk(2, dim=-1)
     gate = F.silu(gate)
@@ -321,7 +325,7 @@ def _swiglu_silu_clamp_mul(x, gemm1_limit):
     return gate * up
 
 
-@torch.compile
+@_torch_compile
 def swiglu_gpt_oss_sigmoid_alpha(x, gemm1_alpha, gemm1_limit):
     # NOTE: This variant uses gemm1_alpha, unlike _swiglu_silu_clamp_mul.
     # At present, only GPT-OSS uses this variant.

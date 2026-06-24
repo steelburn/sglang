@@ -137,6 +137,10 @@ These models have been tested and verified on gfx1151:
 | `Qwen/Qwen3.5-4B` | 4B | Qwen3.5 hybrid (24 MLA + 8 full attn) | ~27s | ✅ 2.5s first token |
 | `Qwen/Qwen3.5-9B` | 9B | Qwen3.5 hybrid (24 MLA + 8 full attn) | ~35s | ✅ 4.8s first token |
 
+> **Note:** On gfx1151, use `--attention-backend torch_native` (FlashInfer is CUDA-only,
+> AITER is CDNA-only). The triton attention backend may have compilation issues
+> on RDNA3 with certain model architectures.
+
 ### Launch example
 
 ```bash Command

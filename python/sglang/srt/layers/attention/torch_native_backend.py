@@ -78,7 +78,7 @@ class TorchNativeAttnBackend(AttentionBackend):
             end_kv = start_kv + seq_len_kv
 
             per_req_query = query[:, start_q:end_q, :]
-            per_req_query_redudant = torch.empty(
+            per_req_query_redudant = torch.zeros(
                 (per_req_query.shape[0], seq_len_kv, per_req_query.shape[2]),
                 dtype=per_req_query.dtype,
                 device=per_req_query.device,
