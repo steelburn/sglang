@@ -115,10 +115,20 @@ RUN SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0" \
 
 # Re-install ROCm torch (pip install -e python may have pulled CUDA torch)
 # and torchvision from ROCm index (CUDA torchvision is incompatible)
+# Then patch torchvision._meta_registrations to handle missing CUDA ops on ROCm
+COPY docker/patch-torchvision-rocm.py /opt/patch-torchvision-rocm.py
 RUN python3 -m pip install --no-cache-dir --force-reinstall \
     torch==2.12.1 \
     "torchvision>=0.27.0,<0.28.0" \
-    --index-url https://download.pytorch.org/whl/rocm7.1
+    --index-url https://download.pytorch.org/whl/rocm7.1 \
+    && python3 /opt/patch-torchvision-rocm.py
+
+# Remove CUDA-only sgl_kernel / sglang-kernel (incompatible on ROCm).
+# The editable install pulls it as a dependency, but its .so files are CUDA-only.
+# Then create a stub sgl_kernel package so module-level imports don't fail.
+COPY docker/create-sgl-kernel-stub.py /opt/create-sgl-kernel-stub.py
+RUN python3 -m pip uninstall -y sglang-kernel sgl_kernel 2>/dev/null || true \
+    && python3 /opt/create-sgl-kernel-stub.py
 
 # Ensure nvidia packages needed by pre-built sgl_kernel persist
 RUN python3 -m pip install --no-cache-dir \

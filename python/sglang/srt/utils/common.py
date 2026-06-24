@@ -87,7 +87,10 @@ from starlette.routing import Mount
 from torch import nn
 from torch.library import Library
 from torch.utils._contextlib import _DecoratorContextManager
-from torchvision.io import decode_jpeg
+
+# Lazy import: torchvision.io registers CUDA-native ops that don't exist on ROCm.
+# decode_jpeg is only used optionally in load_image_bytes; PIL fallback exists.
+# See decode_image_jpeg_inner() for the deferred import.
 from typing_extensions import Literal
 
 from sglang.srt.environ import envs
@@ -874,6 +877,10 @@ def _load_image(
         image_bytes = get_image_bytes(image_file)
     if is_jpeg_with_cuda(image_bytes, gpu_image_decode):
         try:
+            # Lazy import: torchvision.io registers CUDA-native ops at import time
+            # which don't exist on ROCm. Only import when actually needed.
+            from torchvision.io import decode_jpeg
+
             encoded_image = torch.frombuffer(image_bytes, dtype=torch.uint8)
             image_tensor = decode_jpeg(encoded_image, device="cuda")
             return image_tensor
