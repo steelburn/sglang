@@ -51,6 +51,8 @@ cd sglang
 # Compile sgl-kernel
 pip install --upgrade pip
 cd sgl-kernel
+# Set your GPU architecture: gfx942 (MI300), gfx950 (MI350), or gfx1151 (RDNA3)
+export AMDGPU_TARGET=gfx1151
 python setup_rocm.py install
 
 # Install sglang python package along with diffusion support
@@ -113,7 +115,81 @@ The steps below show how to build and use an image.
        --random-output 128
    ```
 
-With your AMD system properly configured and SGLang installed, you can now fully leverage AMD hardware to power SGLang’s machine learning capabilities.
+With your AMD system properly configured and SGLang installed, you can now fully leverage AMD hardware to power SGLang's machine learning capabilities.
+
+## RDNA 3 Consumer GPUs (gfx1151)
+
+SGLang supports AMD RDNA 3 consumer GPUs (e.g., Radeon 8060S, gfx1151) with the following considerations:
+
+- **Attention backend:** Use `--attention-backend torch_native` (FlashInfer is CUDA-only, AITER is CDNA-only).
+- **CUDA graphs:** Use `--disable-cuda-graph`. CUDA graphs trigger a ROCr driver crash on gfx1151 (`rocr::core::InterceptQueue::Submit`).
+- **Tool support:** Use `--tool-call-parser qwen` for Qwen models (supports function calling with `tool_choice: "auto"`).
+- **No RDMA/Mooncake:** Consumer GPUs lack the necessary interconnects for disaggregated serving.
+- **No MXFP4:** Requires CDNA3/CDNA4 hardware.
+- **Context length:** 256K+ context models work; use `--max-total-tokens` to manage KV cache memory.
+
+### Verified models
+
+These models have been tested and verified on gfx1151:
+
+| Model | Size | Architecture | Load Time | Inference |
+|---|---|---|---|---|
+| `Qwen/Qwen2.5-0.5B-Instruct` | 0.5B | Qwen2.5 | ~10s | ✅ |
+| `Qwen/Qwen3.5-4B` | 4B | Qwen3.5 hybrid (24 MLA + 8 full attn) | ~27s | ✅ ~2.5s first token, tool calls ✅ |
+| `Qwen/Qwen3.5-9B` | 9B | Qwen3.5 hybrid (24 MLA + 8 full attn) | ~35s | ✅ ~4.8s first token |
+
+> **Note:** On gfx1151, use `--attention-backend torch_native` (FlashInfer is CUDA-only,
+> AITER is CDNA-only). The triton attention backend may have compilation issues
+> on RDNA3 with certain model architectures. Always pair with `--disable-cuda-graph`.
+
+### Launch examples
+
+**Basic inference:**
+```bash Command
+python3 -m sglang.launch_server \
+    --model-path Qwen/Qwen3.5-4B \
+    --attention-backend torch_native \
+    --disable-cuda-graph \
+    --trust-remote-code \
+    --mem-fraction-static 0.45 \
+    --max-total-tokens 65536 \
+    --host 0.0.0.0 --port 30000
+```
+
+**With tool/function calling support:**
+```bash Command
+python3 -m sglang.launch_server \
+    --model-path Qwen/Qwen3.5-4B \
+    --attention-backend torch_native \
+    --disable-cuda-graph \
+    --trust-remote-code \
+    --tool-call-parser qwen \
+    --host 0.0.0.0 --port 30000
+```
+
+### Container build
+
+A dedicated Dockerfile for gfx1151 is available at `docker/gfx1151.Dockerfile`. It uses ROCm 7.2.4 base and includes the necessary patches for torchvision and sgl_kernel compatibility on RDNA 3.
+
+```bash Command
+# Build
+docker build -t sglang-gfx1151 -f docker/gfx1151.Dockerfile .
+
+# Run with tool support
+docker run -d --name sglang --rm \
+    --device=/dev/kfd --device=/dev/dri \
+    --group-add=video --ipc=host --network=host \
+    -e TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1 \
+    sglang-gfx1151 \
+    python3 -m sglang.launch_server \
+        --model Qwen/Qwen3.5-4B \
+        --attention-backend torch_native \
+        --disable-cuda-graph \
+        --trust-remote-code \
+        --tool-call-parser qwen \
+        --host 0.0.0.0 --port 30000
+```
+
 
 ## Quantization on AMD GPUs
 

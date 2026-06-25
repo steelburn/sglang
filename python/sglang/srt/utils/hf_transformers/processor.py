@@ -260,6 +260,19 @@ def get_processor(
             )
         else:
             raise
+    except OSError:
+        logger.info(
+            "AutoProcessor failed for %s (no image processor), "
+            "falling back to AutoTokenizer",
+            tokenizer_name,
+        )
+        processor = AutoTokenizer.from_pretrained(
+            tokenizer_name,
+            *args,
+            trust_remote_code=trust_remote_code,
+            revision=revision,
+            **kwargs,
+        )
     if (
         isinstance(processor, PreTrainedTokenizerBase)
         and getattr(config, "model_type", None) == "pixtral"

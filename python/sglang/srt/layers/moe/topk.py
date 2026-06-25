@@ -183,7 +183,10 @@ if _is_cuda:
         pass
 
 if _is_cuda or _is_hip or _is_xpu:
-    from sgl_kernel import topk_softmax
+    try:
+        from sgl_kernel import topk_softmax
+    except ImportError:
+        pass
 
     try:
         from sgl_kernel import topk_sigmoid

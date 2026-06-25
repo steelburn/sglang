@@ -43,32 +43,59 @@ from sglang.srt.mem_cache.memory_pool import (
 )
 from sglang.srt.utils import is_cuda, is_hip, is_mps, is_npu, is_xpu
 
+logger = logging.getLogger(__name__)
+
 _is_cuda = is_cuda()
 _is_hip = is_hip()
 _is_npu = is_npu()
 _is_xpu = is_xpu()
 _is_mps = is_mps()
 if _is_cuda or _is_hip:
-    from sgl_kernel.kvcacheio import (
-        transfer_kv_all_layer,
-        transfer_kv_all_layer_direct_lf_pf,
-        transfer_kv_all_layer_lf_pf,
-        transfer_kv_all_layer_lf_ph,
-        transfer_kv_all_layer_mla,
-        transfer_kv_all_layer_mla_lf_pf,
-        transfer_kv_direct,
-        transfer_kv_per_layer,
-        transfer_kv_per_layer_direct_pf_lf,
-        transfer_kv_per_layer_mla,
-        transfer_kv_per_layer_mla_pf_lf,
-        transfer_kv_per_layer_pf_lf,
-        transfer_kv_per_layer_ph_lf,
-    )
+    try:
+        from sgl_kernel.kvcacheio import (
+            transfer_kv_all_layer,
+            transfer_kv_all_layer_direct_lf_pf,
+            transfer_kv_all_layer_lf_pf,
+            transfer_kv_all_layer_lf_ph,
+            transfer_kv_all_layer_mla,
+            transfer_kv_all_layer_mla_lf_pf,
+            transfer_kv_direct,
+            transfer_kv_per_layer,
+            transfer_kv_per_layer_direct_pf_lf,
+            transfer_kv_per_layer_mla,
+            transfer_kv_per_layer_mla_pf_lf,
+            transfer_kv_per_layer_pf_lf,
+            transfer_kv_per_layer_ph_lf,
+        )
+    except ImportError:
+        logger.warning(
+            "sgl_kernel.kvcacheio not available (expected on ROCm without sgl_kernel). "
+            "Host-device KV transfer disabled."
+        )
+
+        def _stub_raise(*args, **kwargs):
+            raise RuntimeError(
+                "Host-device KV transfer requires sgl_kernel.kvcacheio (CUDA/ROCm). "
+                "Not available on this backend."
+            )
+
+        transfer_kv_all_layer = _stub_raise
+        transfer_kv_all_layer_direct_lf_pf = _stub_raise
+        transfer_kv_all_layer_lf_pf = _stub_raise
+        transfer_kv_all_layer_lf_ph = _stub_raise
+        transfer_kv_all_layer_mla = _stub_raise
+        transfer_kv_all_layer_mla_lf_pf = _stub_raise
+        transfer_kv_direct = _stub_raise
+        transfer_kv_per_layer = _stub_raise
+        transfer_kv_per_layer_direct_pf_lf = _stub_raise
+        transfer_kv_per_layer_mla = _stub_raise
+        transfer_kv_per_layer_mla_pf_lf = _stub_raise
+        transfer_kv_per_layer_pf_lf = _stub_raise
+        transfer_kv_per_layer_ph_lf = _stub_raise
 if _is_npu:
     from sgl_kernel_npu.kvcacheio import TransferDirection, transfer_kv_dim_exchange
 
 logger = logging.getLogger(__name__)
-
 
 from sglang.srt.mem_cache.pool_host import HostKVCache
 from sglang.srt.mem_cache.pool_host.base import (

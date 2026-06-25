@@ -13,7 +13,7 @@ else
 fi
 
 PYTHON_ROOT_PATH="/opt/venv/bin"
-AMDGPU_TARGET="gfx942;gfx950"
+AMDGPU_TARGET="gfx942;gfx950;gfx1151"
 
 # Pull and run the latest image
 echo "Pulling Docker image: ${IMAGE}"

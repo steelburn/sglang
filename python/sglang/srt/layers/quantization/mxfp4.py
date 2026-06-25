@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import replace
 from typing import TYPE_CHECKING, List, Optional
@@ -145,6 +146,8 @@ if TYPE_CHECKING:
 
 _is_cpu = is_cpu()
 _is_hip = is_hip()
+logger = logging.getLogger(__name__)
+
 _use_aiter = get_bool_env_var("SGLANG_USE_AITER") and _is_hip
 _is_shuffle_moe_mxfp4 = is_gfx95_supported()
 _is_cpu_amx_available = cpu_has_amx_support()
@@ -248,6 +251,7 @@ class Mxfp4Config(QuantizationConfig):
         super().__init__()
         self.is_checkpoint_mxfp4_serialized = is_checkpoint_mxfp4_serialized
         self.ignored_layers = ignored_layers
+        self._dequantize_fallback = False
 
     @classmethod
     def from_config(cls, config):
@@ -261,11 +265,16 @@ class Mxfp4Config(QuantizationConfig):
                     is_checkpoint_mxfp4_serialized=is_checkpoint_mxfp4_serialized
                 )
             else:
-
                 platform = torch.cuda.get_device_properties(0).gcnArchName
-                raise ValueError(
-                    f"Current platform {platform} not support mxfp4 computation"
+                logger.warning(
+                    "MXFP4 hardware support not available on %s. "
+                    "Weights will be dequantized to BF16 automatically. "
+                    "This increases memory usage.",
+                    platform,
                 )
+                cfg = cls(is_checkpoint_mxfp4_serialized=is_checkpoint_mxfp4_serialized)
+                cfg._dequantize_fallback = True
+                return cfg
 
         return cls(is_checkpoint_mxfp4_serialized=is_checkpoint_mxfp4_serialized)
 
@@ -307,7 +316,10 @@ class Mxfp4Config(QuantizationConfig):
                 return UnquantizedLinearMethod()
         elif isinstance(layer, FusedMoE):
             if self.is_checkpoint_mxfp4_serialized:
-                return Mxfp4MoEMethod(prefix=prefix)
+                method = Mxfp4MoEMethod(prefix=prefix)
+                if self._dequantize_fallback:
+                    method._dequantize_fallback = True
+                return method
             else:
                 return Mxfp4DynamicQuantMoEMethod()
         else:
@@ -333,6 +345,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
         self.with_bias = False
         self.use_flashinfer = get_moe_runner_backend().is_flashinfer_mxfp4()
         self.use_marlin = get_moe_runner_backend().is_marlin()
+        self._dequantize_fallback = False
         self.flashinfer_mxfp4_moe_precision = (
             get_global_server_args().flashinfer_mxfp4_moe_precision
         )
@@ -804,7 +817,9 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
 
             return
 
-        if self.use_triton_kernels:
+        if self._dequantize_fallback:
+            self._dequantize_mxfp_weights(layer)
+        elif self.use_triton_kernels:
 
             from triton_kernels.matmul_ogs import FlexCtx, PrecisionConfig
 
@@ -858,7 +873,7 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                         layer.w2_weight_bias.float(), requires_grad=False
                     )
             return
-        else:
+        elif has_triton_kernels:
             from triton_kernels.numerics_details.mxfp import upcast_from_mxfp
 
             w13_weight = upcast_from_mxfp(
@@ -879,7 +894,127 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
             del layer.w2_weight_scale
             layer.w13_weight = Parameter(w13_weight.data, requires_grad=False)
             layer.w2_weight = Parameter(w2_weight.data, requires_grad=False)
+        else:
+            # Pure PyTorch fallback when triton_kernels is not available.
+            # Uses MXFP4QuantizeUtil.dequantize() which is dependency-free.
+            self._dequantize_mxfp_weights(layer)
         torch.cuda.empty_cache()
+
+    def _dequantize_mxfp_weights(self, layer):
+        """Dequantize MXFP4 weights to BF16 using pure-PyTorch MXFP4QuantizeUtil.
+
+        This fallback path is used on GPUs without hardware MXFP4 support
+        (e.g. AMD RDNA3/gfx1151). The forward pass then uses standard
+        BF16 MoE kernels (Triton/TritonKernels).
+        """
+        from sglang.srt.layers.quantization.mxfp4_tensor import MXFP4QuantizeUtil
+
+        mxfp4_block = 32
+
+        # ---- Dequantize w13 (gate_up_proj) ----
+        # w13_weight: [E, 2*N, K/2] uint8 (packed 4-bit, half last dim)
+        # w13_weight_scale: [E, 2*N, K/32] uint8 (E8M0)
+        e, n2, k_half = layer.w13_weight.shape
+        k_full = k_half * 2  # original hidden dim element count
+        # Reshape to expose pack dimension: [E, 2*N, K/32, 16]
+        # (K/2 = K/32 * 16)
+        w13_packed = layer.w13_weight.data.view(
+            e, n2, k_full // mxfp4_block, mxfp4_block // 2
+        )
+        w13_dequant = MXFP4QuantizeUtil.dequantize(
+            quantized_data=w13_packed,
+            scale=layer.w13_weight_scale.data,
+            dtype=torch.bfloat16,
+            block_sizes=[mxfp4_block],
+        )
+        # w13_dequant: [E, 2*N, K] bf16
+        w13_dequant = w13_dequant.reshape(e, n2, k_full)
+
+        # ---- Dequantize w2 (down_proj) ----
+        # w2_weight: [E, K, N/2] uint8
+        # w2_weight_scale: [E, K, N/32] uint8
+        e2, k2, n_half = layer.w2_weight.shape
+        n_full = n_half * 2
+        w2_packed = layer.w2_weight.data.view(
+            e2, k2, n_full // mxfp4_block, mxfp4_block // 2
+        )
+        w2_dequant = MXFP4QuantizeUtil.dequantize(
+            quantized_data=w2_packed,
+            scale=layer.w2_weight_scale.data,
+            dtype=torch.bfloat16,
+            block_sizes=[mxfp4_block],
+        )
+        w2_dequant = w2_dequant.reshape(e2, k2, n_full)
+
+        # ---- Replace layer parameters ----
+        del layer.w13_weight
+        del layer.w2_weight
+        del layer.w13_weight_scale
+        del layer.w2_weight_scale
+
+        layer.w13_weight = Parameter(w13_dequant.contiguous(), requires_grad=False)
+        layer.w2_weight = Parameter(w2_dequant.contiguous(), requires_grad=False)
+
+    def _pytorch_moe_forward(self, layer, x, topk_output):
+        """Pure-PyTorch MoE forward for gfx1151 dequant fallback.
+
+        Avoids Triton fused MoE kernel issues on RDNA3 by using plain
+        torch matmul and activation operations. Slower but reliable.
+        """
+        from sglang.srt.layers.moe.token_dispatcher import StandardCombineInput
+        from sglang.srt.layers.moe.topk import TopKOutputChecker
+
+        # GPU may be in error state from prior attention kernel on gfx1151.
+        # Attempt recovery via synchronize; if that fails, try empty_cache
+        # and a new small allocation to reset the device.
+        try:
+            torch.cuda.synchronize()
+        except Exception:
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+        if TopKOutputChecker.format_is_bypassed(topk_output):
+            topk_output = topk_output.to_standard()
+        topk_weights, topk_ids = topk_output.topk_weights, topk_output.topk_ids
+
+        w13 = layer.w13_weight  # [E, 2*N, K] bf16
+        w2 = layer.w2_weight  # [E, K, N] bf16
+        b13 = getattr(layer, "w13_weight_bias", None)  # [E, 2*N] bf16
+        b2 = getattr(layer, "w2_weight_bias", None)  # [E, K] bf16
+        gemm1_alpha = 1.702
+        gemm1_limit = 7.0
+        num_tokens, hidden = x.shape
+        topk = topk_ids.shape[1]
+        E = w13.shape[0]
+        N = w13.shape[1] // 2  # intermediate per expert
+
+        # Flatten tokens × topk for batched expert compute
+        flat_ids = topk_ids.reshape(-1)  # [num_tokens*topk]
+        flat_weights = topk_weights.reshape(-1, 1)  # [num_tokens*topk, 1]
+
+        out = torch.zeros(num_tokens, hidden, device=x.device, dtype=x.dtype)
+
+        for e in range(E):
+            mask = flat_ids == e
+            if not mask.any():
+                continue
+            idx = mask.nonzero(as_tuple=True)[0]
+            # Gate-up projection
+            h = x[idx // topk] @ w13[e].T  # [n_selected, 2*N]
+            if b13 is not None:
+                h = h + b13[e : e + 1]
+            # SwiGLU with sigmoid(alpha)
+            gate, up = h[..., ::2], h[..., 1::2]
+            gate = gate.clamp(min=None, max=gemm1_limit)
+            up = up.clamp(min=-gemm1_limit, max=gemm1_limit)
+            h_act = gate * torch.sigmoid(gate * gemm1_alpha) * (up + 1)
+            # Down projection
+            h_out = h_act @ w2[e].T  # [n_selected, K]
+            if b2 is not None:
+                h_out = h_out + b2[e : e + 1]
+            out.index_add_(0, idx // topk, h_out * flat_weights[idx])
+
+        return StandardCombineInput(hidden_states=out)
 
     def _process_weights_for_sm90_cutlass(self, layer):
         """De-interleave + pad + halving-swap + byte-interleave MXFP4 weights
@@ -1298,6 +1433,11 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 b13=getattr(layer, "w13_weight_bias", None),
                 b2=getattr(layer, "w2_weight_bias", None),
             )
+        # gfx1151 dequant fallback: use pure-PyTorch MoE to avoid
+        # Triton fused MoE kernel compilation issues on RDNA3.
+        if self._dequantize_fallback:
+            torch.cuda.synchronize()
+            return self._pytorch_moe_forward(layer, x, topk_output)
         return self.runner.run(dispatch_output, quant_info)
 
 

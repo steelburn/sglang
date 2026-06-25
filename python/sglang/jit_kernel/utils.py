@@ -156,7 +156,31 @@ CPP_DTYPE_MAP = {
 # AMD/ROCm note:
 @cache_once
 def is_hip_runtime() -> bool:
+    """Return ``True`` when running under ROCm (HIP) runtime.
+
+    ``torch.version.hip`` is set to a non‑empty string when PyTorch is built with
+    ROCm support. The helper is cached because it never changes during the
+    lifetime of the process.
+    """
     return bool(torch.version.hip)
+
+
+@cache_once
+def _get_rocm_arch() -> str:
+    """Return the current AMD GPU architecture name (e.g., ``gfx1151``).
+
+    The function queries ``torch.cuda.get_device_properties`` which works on
+    ROCm devices as well. If detection fails we return an empty string so the
+    surrounding code can fall back to a safe default.
+    """
+    try:
+        prop = torch.cuda.get_device_properties(0)
+        # ``gcnArchName`` may contain a colon suffix like "gfx1151:XX".
+        gcn_arch = getattr(prop, "gcnArchName", "")
+        return gcn_arch.split(":")[0]
+    except Exception as e:
+        logger.warning("Cannot detect ROCm architecture: %s", e)
+        return ""
 
 
 # MThreads/MUSA note:
@@ -358,9 +382,28 @@ def _init_jit_cuda_arch_once():
 
 @contextmanager
 def _jit_compile_context():
+    """Temporarily set the TVM FFI architecture environment variable.
+
+    For CUDA we set ``TVM_FFI_CUDA_ARCH_LIST`` to the detected compute capability.
+    For ROCm we set ``TVM_FFI_ROCM_ARCH_LIST`` to the detected ``gcnArchName``
+    (e.g., ``gfx1151``). The previous value is restored after the context exits.
+    """
     if is_hip_runtime():
-        yield  # TODO: support ROCm `TVM_FFI_ROCM_ARCH_LIST` if needed
+        env_key = "TVM_FFI_ROCM_ARCH_LIST"
+        old_value = os.environ.get(env_key, None)
+        # Use the base architecture without any colon suffix.
+        arch = _get_rocm_arch()
+        if arch:
+            os.environ[env_key] = arch
+        try:
+            yield
+        finally:
+            if old_value is None:
+                os.environ.pop(env_key, None)
+            else:
+                os.environ[env_key] = old_value
         return
+    # CUDA path – unchanged from original implementation.
     env_key = "TVM_FFI_CUDA_ARCH_LIST"
     old_value = os.environ.get(env_key, None)
     os.environ[env_key] = get_jit_cuda_arch().target_name
@@ -375,18 +418,24 @@ def _jit_compile_context():
 
 # NOTE: this might also be used in __main__.py for compile flags export
 def _get_default_target_flags() -> List[str]:
+    """Return default compiler flags for the target runtime.
+
+    For HIP we also emit a macro defining the FP8 type encoding based on the
+    detected GPU architecture. ``gfx1151`` (and newer RDNA3 GPUs such as
+    ``gfx942``) use the ``FNUZ`` encoding, while ``gfx950`` uses the ``E4M3``
+    encoding. The helper ``_get_rocm_arch`` is used to query the current device.
+    """
     if is_hip_runtime():
         flags = ["-DUSE_ROCM", "-std=c++20", "-O3"]
-        # Detect FP8 type based on GPU architecture
-        try:
-            device = torch.cuda.current_device()
-            gcn_arch = torch.cuda.get_device_properties(device).gcnArchName
-            if "gfx942" in gcn_arch:
+        arch = _get_rocm_arch()
+        # Only add FP8 type macro if we successfully detected an architecture.
+        if arch:
+            # gfx1151 and newer (including gfx942) use FNUZ encoding.
+            if arch.startswith("gfx11") or arch.startswith("gfx94"):
                 flags.append("-DHIP_FP8_TYPE_FNUZ=1")
-            else:
+            # gfx950 uses the older E4M3 encoding.
+            elif arch.startswith("gfx950"):
                 flags.append("-DHIP_FP8_TYPE_E4M3=1")
-        except Exception:
-            flags.append("-DHIP_FP8_TYPE_E4M3=1")
         return flags
     else:
         return [

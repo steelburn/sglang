@@ -5,7 +5,20 @@ import torch
 from sglang.srt.utils.common import is_cuda, is_hip, is_musa, is_npu
 
 if is_cuda() or is_hip() or is_musa():
-    from sgl_kernel import weak_ref_tensor
+    try:
+        from sgl_kernel import weak_ref_tensor
+    except ImportError:
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning(
+            "sgl_kernel.weak_ref_tensor not available (expected on ROCm without sgl_kernel). "
+            "Falling back to custom implementation."
+        )
+
+        def weak_ref_tensor(tensor):
+            return (
+                tensor._make_weak_ref() if hasattr(tensor, "_make_weak_ref") else tensor
+            )
+
 elif is_npu():
     from torch_npu._C import _weak_ref_tensor as weak_ref_tensor
 else:

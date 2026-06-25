@@ -32,6 +32,31 @@ Requires
 make build
 ```
 
+### On AMD ROCm GPUs
+
+To build `sglang-kernel` for an AMD GPU, set the `AMDGPU_TARGET` environment variable to your GPU architecture:
+
+```bash
+# For MI300/MI325 (CDNA3, gfx942)
+export AMDGPU_TARGET=gfx942
+
+# For MI350/MI355 (CDNA4, gfx950)
+export AMDGPU_TARGET=gfx950
+
+# For RDNA3 consumer GPUs e.g. Radeon 8060S (gfx1151)
+export AMDGPU_TARGET=gfx1151
+```
+
+Then build with:
+
+```bash
+# Using setup_rocm.py (legacy ROCm build)
+python setup_rocm.py install
+
+# Or using the Makefile (for CMake-based build)
+make build
+```
+
 ### Limit build resource usage (CPU / parallelism)
 
 By default, `make build` uses all available CPU cores. You can override build parallelism and NVCC compile threads:

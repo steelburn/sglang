@@ -67,7 +67,9 @@ if _is_cuda:
 elif _is_xpu:
     from sgl_kernel import gelu_and_mul, gelu_tanh_and_mul, silu_and_mul
 elif _is_hip:
-    from sgl_kernel import gelu_and_mul, gelu_quick, gelu_tanh_and_mul, silu_and_mul
+    # ROCm: use pure-PyTorch native fallback
+    # (JIT kernel CUDA headers not found, sgl_kernel is CUDA-only on PyPI)
+    pass
 elif _is_musa:
     from sglang.srt.utils.patch_torch import register_fake_if_exists
 
@@ -220,9 +222,7 @@ class QuickGELU(MultiPlatformOp):
         return self.forward_native(x)
 
     def forward_hip(self, x: torch.Tensor) -> torch.Tensor:
-        out = torch.empty(x.shape, dtype=x.dtype, device=x.device)
-        gelu_quick(x, out)
-        return out
+        return self.forward_native(x)
 
     def forward_npu(self, x: torch.Tensor) -> torch.Tensor:
         return torch_npu.npu_fast_gelu(x)
@@ -429,3 +429,11 @@ def get_cross_encoder_activation_function(config: PretrainedConfig):
     else:
         # adapt bge-reranker
         return nn.Identity()
+
+
+# ROCm: override forward_hip to use native PyTorch fallback for activation ops.
+# This avoids dependency on sgl_kernel (CUDA-only) and JIT kernel (CUDA headers).
+if _is_hip:
+    SiluAndMul.forward_hip = SiluAndMul.forward_native
+    GeluAndMul.forward_hip = GeluAndMul.forward_native
+    QuickGELU.forward_hip = QuickGELU.forward_native
